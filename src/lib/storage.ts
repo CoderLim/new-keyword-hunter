@@ -18,7 +18,15 @@ export class KeywordStorage {
    */
   static async getEffectiveNewWords(): Promise<Set<string>> {
     const data = await storage.getItem<string>("effectiveNewWords")
-    return new Set(data ? JSON.parse(data) : [])
+    if (!data) {
+      return new Set()
+    }
+    try {
+      return new Set(JSON.parse(data))
+    } catch (error) {
+      console.error("解析有效新词失败:", error)
+      return new Set()
+    }
   }
 
   /**
@@ -46,7 +54,15 @@ export class KeywordStorage {
    */
   static async getProcessedKeywords(): Promise<Set<string>> {
     const data = await storage.getItem<string>("processedKeywords")
-    return new Set(data ? JSON.parse(data) : [])
+    if (!data) {
+      return new Set()
+    }
+    try {
+      return new Set(JSON.parse(data))
+    } catch (error) {
+      console.error("解析已处理关键词失败:", error)
+      return new Set()
+    }
   }
 
   /**
@@ -74,7 +90,15 @@ export class KeywordStorage {
    */
   static async getKeywordsQueue(): Promise<string[]> {
     const data = await storage.getItem<string>("keywordsQueue")
-    return data ? JSON.parse(data) : []
+    if (!data) {
+      return []
+    }
+    try {
+      return JSON.parse(data)
+    } catch (error) {
+      console.error("解析关键词队列失败:", error)
+      return []
+    }
   }
 
   /**
@@ -118,7 +142,15 @@ export class KeywordStorage {
    */
   static async getHistoryRecords(): Promise<HistoryRecord[]> {
     const data = await storage.getItem<string>("historyRecords")
-    return data ? JSON.parse(data) : []
+    if (!data) {
+      return []
+    }
+    try {
+      return JSON.parse(data)
+    } catch (error) {
+      console.error("解析历史记录失败:", error)
+      return []
+    }
   }
 
   /**
@@ -155,8 +187,8 @@ export class KeywordStorage {
    */
   static async getCaptureState(): Promise<CaptureState> {
     const data = await storage.getItem<string>("captureState")
-    return (
-      data ?? JSON.parse(data) ?? {
+    if (!data) {
+      return {
         isActive: false,
         currentKeyword: "",
         processedCount: 0,
@@ -165,7 +197,21 @@ export class KeywordStorage {
         currentDepth: 0,
         statusMessage: "未开始"
       }
-    )
+    }
+    try {
+      return JSON.parse(data)
+    } catch (error) {
+      console.error("解析捕获状态失败:", error)
+      return {
+        isActive: false,
+        currentKeyword: "",
+        processedCount: 0,
+        queueSize: 0,
+        effectiveNewWordsCount: 0,
+        currentDepth: 0,
+        statusMessage: "未开始"
+      }
+    }
   }
 
   /**
@@ -180,7 +226,15 @@ export class KeywordStorage {
    */
   static async getCaptureOptions(): Promise<CaptureOptions | null> {
     const data = await storage.getItem<string>("captureOptions")
-    return data ? JSON.parse(data) : null
+    if (!data) {
+      return null
+    }
+    try {
+      return JSON.parse(data)
+    } catch (error) {
+      console.error("解析捕获配置失败:", error)
+      return null
+    }
   }
 
   /**

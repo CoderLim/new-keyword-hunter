@@ -61,6 +61,7 @@ export interface CaptureState {
   effectiveNewWordsCount: number
   currentDepth: number
   statusMessage: string
+  maxKeywords?: number
   lastError?: string
 }
 

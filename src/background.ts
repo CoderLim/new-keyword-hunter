@@ -27,6 +27,19 @@ async function sendStatusUpdate(state: Partial<CaptureState>) {
 }
 
 /**
+ * 同步队列大小到状态
+ */
+async function syncQueueSize(): Promise<number> {
+  const queue = await KeywordStorage.getKeywordsQueue()
+  const queueSize = queue.length
+  const state = await KeywordStorage.getCaptureState()
+  const updatedState = { ...state, queueSize }
+  await KeywordStorage.setCaptureState(updatedState)
+  await sendStatusUpdate({ queueSize })
+  return queueSize
+}
+
+/**
  * 处理下一个关键词
  */
 async function processNextKeyword(): Promise<boolean> {
@@ -47,12 +60,15 @@ async function processNextKeyword(): Promise<boolean> {
 
   if (!nextKeyword) {
     // 队列为空，等待其他请求填充
+    const queueSize = await syncQueueSize()
     await KeywordStorage.setCaptureState({
       ...state,
+      queueSize,
       statusMessage: "等待新关键词...",
       currentKeyword: ""
     })
     await sendStatusUpdate({
+      queueSize,
       statusMessage: "等待新关键词...",
       currentKeyword: ""
     })
@@ -62,11 +78,15 @@ async function processNextKeyword(): Promise<boolean> {
   // 标记为已处理
   await KeywordStorage.addProcessedKeyword(nextKeyword)
 
+  // 同步队列大小
+  const queueSize = await syncQueueSize()
+
   // 更新状态
   const newState: CaptureState = {
     ...state,
     currentKeyword: nextKeyword,
     processedCount: state.processedCount + 1,
+    queueSize,
     statusMessage: `正在处理: ${nextKeyword}`
   }
   await KeywordStorage.setCaptureState(newState)
@@ -100,14 +120,18 @@ async function startCapture(options: CaptureOptions) {
   const filtered = filterLowValueKeywords(options.seedKeywords)
   await KeywordStorage.addToQueue(filtered)
 
+  // 获取实际队列大小（因为 addToQueue 会去重和过滤）
+  const actualQueueSize = (await KeywordStorage.getKeywordsQueue()).length
+
   const state: CaptureState = {
     isActive: true,
     currentKeyword: "",
     processedCount: 0,
-    queueSize: filtered.length,
+    queueSize: actualQueueSize,
     effectiveNewWordsCount: 0,
     currentDepth: 0,
-    statusMessage: "准备开始..."
+    statusMessage: "准备开始...",
+    maxKeywords: options.maxKeywords
   }
 
   await KeywordStorage.setCaptureState(state)
@@ -185,9 +209,16 @@ async function handleInterceptedData(url: string, responseBody: string) {
     if (others.length > 0) {
       await KeywordStorage.addToQueue(others)
 
-      const queueSize = await KeywordStorage.getKeywordsQueue()
+      // 同步队列大小并更新状态
+      const queueSize = await syncQueueSize()
+      const updatedState = {
+        ...state,
+        queueSize,
+        currentDepth: state.currentDepth + 1
+      }
+      await KeywordStorage.setCaptureState(updatedState)
       await sendStatusUpdate({
-        queueSize: queueSize.length,
+        queueSize,
         currentDepth: state.currentDepth + 1
       })
     }
@@ -259,11 +290,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
     case "ADD_TO_QUEUE":
       if (message.payload && Array.isArray(message.payload)) {
         KeywordStorage.addToQueue(message.payload as string[]).then(() => {
-          KeywordStorage.getCaptureState().then((state) => {
-            sendStatusUpdate({
-              queueSize: state.queueSize + (message.payload as string[]).length
-            })
-          })
+          syncQueueSize()
         })
       }
       sendResponse({ success: true })
