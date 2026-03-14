@@ -1,0 +1,30 @@
+{
+  "name": "new-keyword-hunter",
+  "displayName": "新词挖掘助手",
+  "version": "1.0.0",
+  "description": "Chrome extension for mining emerging keywords from Google Trends",
+  "type": "module",
+  "scripts": {
+    "dev": "plasmo dev && cp -r static/side-panel.* build/chrome-mv3-dev/ && node scripts/fix-manifest.js build/chrome-mv3-dev/manifest.json",
+    "build": "plasmo build && cp -r static/side-panel.* build/chrome-mv3-prod/ && node scripts/fix-manifest.js build/chrome-mv3-prod/manifest.json",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "@plasmohq/storage": "^1.15.0",
+    "plasmo": "^0.90.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@plasmohq/rps": "^1.8.7",
+    "@types/chrome": "^0.0.302",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "typescript": "^5.7.3"
+  },
+  "manifest": {
+    "host_permissions": ["*://trends.google.com/*"],
+    "permissions": ["webRequest", "storage", "tabs", "downloads", "sidePanel"]
+  }
+}

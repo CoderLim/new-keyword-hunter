@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>新词挖掘助手</title>
+    <style>
+      /* Global styles */
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #f5f5f5;
+        color: #333;
+      }
+      .container {
+        width: 100%;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      /* Header */
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
+      .subtitle {
+        margin: 0.25rem 0 0 0;
+        font-size: 0.75rem;
+        opacity: 0.9;
+      }
+      /* Main content */
+      .main {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      /* Form styles */
+      .input-section {
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+      .form-group {
+        margin-bottom: 1rem;
+      }
+      .form-group label {
+        display: block;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: #666;
+        margin-bottom: 0.25rem;
+        text-transform: uppercase;
+      }
+      .form-group input,
+      .form-group select,
+      .form-group textarea {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 0.875rem;
+        box-sizing: border-box;
+      }
+      .form-group input:focus,
+      .form-group select:focus,
+      .form-group textarea:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+      .form-row {
+        display: flex;
+        gap: 0.75rem;
+      }
+      .btn-primary {
+        width: 100%;
+        padding: 0.75rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .btn-primary:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+      }
+      .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      /* Status section */
+      .status-section {
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+      .status-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+      .status-header h3 {
+        margin: 0;
+        font-size: 0.875rem;
+        font-weight: 600;
+      }
+      .status-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+      .status-badge.active {
+        background: #e6f4ea;
+        color: #1e8e3e;
+      }
+      .status-badge.inactive {
+        background: #f8f9fa;
+        color: #666;
+      }
+      .status-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+      }
+      .status-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+      }
+      .status-label {
+        font-size: 0.625rem;
+        color: #888;
+        text-transform: uppercase;
+      }
+      .status-value {
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #333;
+      }
+      .status-value.highlight {
+        color: #667eea;
+        font-size: 1rem;
+      }
+      .actions {
+        display: flex;
+        gap: 0.75rem;
+      }
+      .btnStop,
+      .btnExport {
+        flex: 1;
+        padding: 0.75rem;
+        border: 1px solid;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .btnStop {
+        background: #fee;
+        color: #c33;
+        border-color: #fcc;
+      }
+      .btnExport {
+        background: #e6f4ea;
+        color: #1e8e3e;
+        border-color: #ceead6;
+      }
+      /* Words section */
+      .words-section {
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+      .words-header h3 {
+        margin: 0 0 0.75rem 0;
+        font-size: 0.875rem;
+        font-weight: 600;
+      }
+      .search-input {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        margin-bottom: 0.75rem;
+        box-sizing: border-box;
+      }
+      .words-list {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .words-list ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .words-list li {
+        padding: 0.375rem 0;
+        border-bottom: 1px solid #f0f0f0;
+        font-size: 0.8125rem;
+      }
+      .empty-state {
+        color: #999;
+        font-size: 0.75rem;
+        text-align: center;
+        padding: 1rem;
+      }
+      /* Footer */
+      .footer {
+        padding: 0.75rem 1rem;
+        background: white;
+        border-top: 1px solid #eee;
+        text-align: center;
+      }
+      .footer p {
+        margin: 0;
+        font-size: 0.625rem;
+        color: #999;
+      }
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <h1>🔍 新词挖掘助手</h1>
+        <p class="subtitle">从 Google Trends 发现新兴关键词</p>
+      </header>
+
+      <main class="main">
+        <div id="inputSection" class="input-section">
+          <div class="form-group">
+            <label for="baseKeyword">基准词 (用于标识)</label>
+            <input
+              id="baseKeyword"
+              type="text"
+              placeholder="例如: AI"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="seedKeywords">种子关键词 (每行一个或逗号分隔)</label>
+            <textarea
+              id="seedKeywords"
+              placeholder="例如: ChatGPT&#10;OpenAI&#10;人工智能"
+              rows="4"
+            ></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="timeRange">时间范围</label>
+              <select id="timeRange">
+                <option value="today 12-m">过去 12 个月</option>
+                <option value="today 3-m">过去 3 个月</option>
+                <option value="today 1-m">过去 1 个月</option>
+                <option value="today 5-y">过去 5 年</option>
+                <option value="all">全部时间</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="geo">地区</label>
+              <select id="geo">
+                <option value="CN">中国</option>
+                <option value="US">美国</option>
+                <option value="">全球</option>
+                <option value="JP">日本</option>
+                <option value="KR">韩国</option>
+                <option value="GB">英国</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="threshold">阈值 (后期平均值)</label>
+              <input
+                id="threshold"
+                type="number"
+                min="1"
+                max="100"
+                value="10"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="maxKeywords">最大关键词数 (0为无限制)</label>
+              <input
+                id="maxKeywords"
+                type="number"
+                min="0"
+                value="100"
+              />
+            </div>
+          </div>
+
+          <button id="startBtn" class="btn-primary">开始挖掘</button>
+        </div>
+
+        <div id="statusSection" class="status-section hidden">
+          <div class="status-header">
+            <h3>挖掘状态</h3>
+            <span id="statusBadge" class="status-badge active">运行中</span>
+          </div>
+
+          <div class="status-grid">
+            <div class="status-item">
+              <span class="status-label">当前关键词</span>
+              <span id="currentKeyword" class="status-value">-</span>
+            </div>
+
+            <div class="status-item">
+              <span class="status-label">已处理</span>
+              <span id="processedCount" class="status-value">0</span>
+            </div>
+
+            <div class="status-item">
+              <span class="status-label">队列大小</span>
+              <span id="queueSize" class="status-value">0</span>
+            </div>
+
+            <div class="status-item">
+              <span class="status-label">有效新词</span>
+              <span id="effectiveNewWordsCount" class="status-value highlight">0</span>
+            </div>
+
+            <div class="status-item">
+              <span class="status-label">当前深度</span>
+              <span id="currentDepth" class="status-value">0</span>
+            </div>
+
+            <div class="status-item" style="grid-column: 1 / -1;">
+              <span class="status-label">状态消息</span>
+              <span id="statusMessage" class="status-value" style="font-size: 0.75rem;">未开始</span>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="stopBtn" class="btnStop">停止挖掘</button>
+            <button id="exportBtn" class="btnExport">导出数据</button>
+          </div>
+        </div>
+
+        <div class="words-section">
+          <div class="words-header">
+            <h3>有效新词 (<span id="wordsCount">0</span>)</h3>
+          </div>
+
+          <input
+            type="text"
+            id="searchInput"
+            class="search-input"
+            placeholder="筛选关键词..."
+          />
+
+          <div class="words-list">
+            <ul id="wordsList">
+              <li class="empty-state">暂无有效新词</li>
+            </ul>
+          </div>
+        </div>
+      </main>
+
+      <footer class="footer">
+        <p>基于 Plasmo 框架开发</p>
+      </footer>
+    </div>
+
+    <script src="side-panel.js"></script>
+  </body>
+</html>
