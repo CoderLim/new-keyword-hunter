@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "plasmo build && cp -r static/side-panel.* build/chrome-mv3-prod/ && node scripts/fix-manifest.js build/chrome-mv3-prod/manifest.json",
-    "package": "plasmo package"
+    "package": "plasmo package",
+    "test:unit": "rm -rf .tmp-tests && tsc -p tsconfig.test.json && echo '{\"type\":\"commonjs\"}' > .tmp-tests/package.json && node --test .tmp-tests/tests/*.test.js"
   },
   "dependencies": {
     "@plasmohq/storage": "^1.15.0",
