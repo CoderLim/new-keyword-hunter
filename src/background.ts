@@ -1,4 +1,3 @@
-import { Storage } from "@plasmohq/storage"
 import { KeywordStorage } from "~lib/storage"
 import {
   isRelatedSearchesRequest,
@@ -13,16 +12,16 @@ import {
   isNewWordEffective,
   isNewWordEffectiveByBase
 } from "~lib/keyword-analyzer"
-import type { CaptureState, CaptureOptions, Message } from "~types"
+import type { CaptureState, CaptureOptions, Message, CaptureEndType } from "~types"
 
-const storage = new Storage({
-  area: "local"
-})
 const recentInterceptSignatures = new Map<string, number>()
 const timelineKeywordProcessedAt = new Map<string, number>()
 let isProcessingNextKeyword = false
 let emptyQueueRetryCount = 0
 const MAX_EMPTY_QUEUE_RETRY = 4
+let captureStartedAt = 0
+let hasFinalizedCurrentRun = false
+let isFinalizingCapture = false
 
 function isDuplicateIntercept(url: string, responseBody: string): boolean {
   const now = Date.now()
@@ -93,9 +92,6 @@ chrome.action.onClicked.addListener((tab) => {
 
 void setupSidePanelBehavior()
 
-// 存储拦截的响应数据
-const interceptedResponses = new Map<string, string>()
-
 /**
  * 发送状态更新
  */
@@ -119,6 +115,84 @@ async function syncQueueSize(): Promise<number> {
   return queueSize
 }
 
+async function finalizeCapture(endType: CaptureEndType, endReason: string) {
+  if (hasFinalizedCurrentRun || isFinalizingCapture) {
+    return
+  }
+
+  isFinalizingCapture = true
+
+  try {
+    const state = await KeywordStorage.getCaptureState()
+    const options = await KeywordStorage.getCaptureOptions()
+
+    if (!state.isActive || !options) {
+      return
+    }
+
+    hasFinalizedCurrentRun = true
+
+    const effectiveSet = await KeywordStorage.getEffectiveNewWords()
+    const processedSet = await KeywordStorage.getProcessedKeywords()
+    const queue = await KeywordStorage.getKeywordsQueue()
+
+    const effectiveNewWords = [...effectiveSet]
+    const processedKeywords = [...processedSet]
+
+    const endedAt = Date.now()
+    const durationMs = captureStartedAt > 0 ? Math.max(0, endedAt - captureStartedAt) : 0
+
+    const statusMessage =
+      endType === "normal"
+        ? `挖掘完成：已处理 ${processedKeywords.length}，有效新词 ${effectiveNewWords.length}`
+        : `异常终止：${endReason}`
+
+    const finalState: CaptureState = {
+      ...state,
+      isActive: false,
+      currentKeyword: "",
+      queueSize: queue.length,
+      effectiveNewWordsCount: effectiveNewWords.length,
+      statusMessage,
+      endType,
+      endReason,
+      ...(endType === "abnormal" ? { lastError: endReason } : { lastError: "" })
+    }
+
+    await KeywordStorage.setCaptureState(finalState)
+    await sendStatusUpdate(finalState)
+
+    await KeywordStorage.setLastCaptureReport({
+      timestamp: endedAt,
+      baseKeyword: options.baseKeyword,
+      seedKeywords: options.seedKeywords,
+      totalProcessed: processedKeywords.length,
+      effectiveNewWords,
+      endType,
+      endReason,
+      durationMs
+    })
+
+    await KeywordStorage.addHistoryRecord({
+      id: endedAt.toString(),
+      timestamp: endedAt,
+      baseKeyword: options.baseKeyword,
+      seedKeywords: options.seedKeywords,
+      totalProcessed: processedKeywords.length,
+      effectiveNewWords: effectiveNewWords.length,
+      duration: Math.floor(durationMs / 1000),
+      endType,
+      endReason,
+      data: {
+        effectiveNewWords,
+        processedKeywords
+      }
+    })
+  } finally {
+    isFinalizingCapture = false
+  }
+}
+
 /**
  * 处理下一个关键词
  */
@@ -139,7 +213,7 @@ async function processNextKeyword(): Promise<boolean> {
 
     // 检查是否达到最大关键词数
     if (options.maxKeywords > 0 && state.processedCount >= options.maxKeywords) {
-      await stopCapture()
+      await finalizeCapture("normal", "达到最大关键词数限制")
       return false
     }
 
@@ -162,17 +236,7 @@ async function processNextKeyword(): Promise<boolean> {
       emptyQueueRetryCount += 1
 
       if (emptyQueueRetryCount >= MAX_EMPTY_QUEUE_RETRY) {
-        const effective = await KeywordStorage.getEffectiveNewWords()
-        const completedState: CaptureState = {
-          ...state,
-          isActive: false,
-          currentKeyword: "",
-          queueSize: 0,
-          effectiveNewWordsCount: effective.size,
-          statusMessage: `挖掘完成：已处理 ${state.processedCount}，有效新词 ${effective.size}`
-        }
-        await KeywordStorage.setCaptureState(completedState)
-        await sendStatusUpdate(completedState)
+        await finalizeCapture("normal", "关键词队列处理完成")
         return false
       }
 
@@ -269,6 +333,8 @@ async function startCapture(options: CaptureOptions) {
   emptyQueueRetryCount = 0
   recentInterceptSignatures.clear()
   timelineKeywordProcessedAt.clear()
+  hasFinalizedCurrentRun = false
+  captureStartedAt = Date.now()
 
   // 初始化
   await KeywordStorage.clearAll()
@@ -288,6 +354,7 @@ async function startCapture(options: CaptureOptions) {
     queueSize: actualQueueSize,
     effectiveNewWordsCount: 0,
     currentDepth: 0,
+    endReason: "",
     statusMessage: "准备开始...",
     maxKeywords: options.maxKeywords
   }
@@ -302,36 +369,7 @@ async function startCapture(options: CaptureOptions) {
  * 停止捕获
  */
 async function stopCapture() {
-  const state = await KeywordStorage.getCaptureState()
-  state.isActive = false
-  state.statusMessage = "已停止"
-  await KeywordStorage.setCaptureState(state)
-
-  await sendStatusUpdate({
-    isActive: false,
-    statusMessage: "已停止"
-  })
-
-  // 保存历史记录
-  const options = await KeywordStorage.getCaptureOptions()
-  if (options) {
-    const effective = await KeywordStorage.getEffectiveNewWords()
-    const processed = await KeywordStorage.getProcessedKeywords()
-
-    await KeywordStorage.addHistoryRecord({
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      baseKeyword: options.baseKeyword,
-      seedKeywords: options.seedKeywords,
-      totalProcessed: state.processedCount,
-      effectiveNewWords: effective.size,
-      duration: 0,
-      data: {
-        effectiveNewWords: [...effective],
-        processedKeywords: [...processed]
-      }
-    })
-  }
+  await finalizeCapture("abnormal", "手动停止")
 }
 
 /**
@@ -521,6 +559,53 @@ chrome.webRequest.onCompleted.addListener(
   },
   {
     urls: ["*://trends.google.com/trends/api/widgetdata/*"]
+  }
+)
+
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    void (async () => {
+      if (details.statusCode !== 429) {
+        return
+      }
+
+      if (
+        details.initiator &&
+        details.initiator.startsWith(`chrome-extension://${chrome.runtime.id}`)
+      ) {
+        return
+      }
+
+      const state = await KeywordStorage.getCaptureState()
+      if (!state.isActive) {
+        return
+      }
+
+      console.error("[NKH] 命中 Google Trends 限频", {
+        url: details.url,
+        statusCode: details.statusCode
+      })
+
+      let endReason = "触发 Google Trends 限频（/api/explore 返回 429）"
+      try {
+        const urlObj = new URL(details.url)
+        if (urlObj.pathname === "/trends/explore") {
+          endReason = "触发 Google Trends 限频（/trends/explore 页面返回 429）"
+        }
+      } catch {
+      }
+
+      await finalizeCapture(
+        "abnormal",
+        endReason
+      )
+    })()
+  },
+  {
+    urls: [
+      "*://trends.google.com/trends/api/explore*",
+      "*://trends.google.com/trends/explore*"
+    ]
   }
 )
 

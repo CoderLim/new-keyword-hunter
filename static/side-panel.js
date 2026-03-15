@@ -6,8 +6,10 @@ let state = {
   queueSize: 0,
   effectiveNewWordsCount: 0,
   currentDepth: 0,
+  endReason: "",
   statusMessage: "未开始"
 }
+let showResultNotice = false
 
 let effectiveWords = []
 
@@ -17,12 +19,15 @@ const statusSection = document.getElementById("statusSection")
 const startBtn = document.getElementById("startBtn")
 const stopBtn = document.getElementById("stopBtn")
 const exportBtn = document.getElementById("exportBtn")
+const resultNoticeEl = document.getElementById("resultNotice")
+const resultNoticeTextEl = document.getElementById("resultNoticeText")
 const currentKeywordEl = document.getElementById("currentKeyword")
 const processedCountEl = document.getElementById("processedCount")
 const queueSizeEl = document.getElementById("queueSize")
 const effectiveNewWordsCountEl = document.getElementById("effectiveNewWordsCount")
 const currentDepthEl = document.getElementById("currentDepth")
 const statusMessageEl = document.getElementById("statusMessage")
+const endReasonEl = document.getElementById("endReason")
 const statusBadgeEl = document.getElementById("statusBadge")
 const wordsCountEl = document.getElementById("wordsCount")
 const wordsListEl = document.getElementById("wordsList")
@@ -62,6 +67,7 @@ async function loadState() {
     const response = await chrome.runtime.sendMessage({ type: "GET_STATUS" })
     if (response) {
       state = response
+      showResultNotice = false
       updateUI()
     }
   } catch (error) {
@@ -114,13 +120,18 @@ function handleStart() {
 
   state.isActive = true
   state.queueSize = options.seedKeywords.length
+  state.endReason = ""
+  showResultNotice = false
   updateUI()
 }
 
 function handleStop() {
+  const wasActive = state.isActive
   chrome.runtime.sendMessage({ type: "STOP_CAPTURE" })
   state.isActive = false
   state.statusMessage = "已停止"
+  state.endReason = "手动停止"
+  showResultNotice = wasActive
   updateUI()
 }
 
@@ -165,6 +176,11 @@ async function handleExport() {
 
 function generateReport(data) {
   const date = new Date(data.timestamp).toLocaleString("zh-CN")
+  const report = data.report || null
+  const effectiveNewWords = report?.effectiveNewWords || data.effectiveNewWords || []
+  const processedCount = report?.totalProcessed ?? data.processedKeywords.length
+  const endType = report?.endType === "abnormal" ? "异常终止" : "正常完成"
+  const endReason = report?.endReason || "未记录"
 
   return `
 ========================================
@@ -175,20 +191,29 @@ function generateReport(data) {
 ----------------------------------------
 
 【统计信息】
-- 有效新词数量: ${data.effectiveNewWords.length}
-- 已处理关键词: ${data.processedKeywords.length}
+- 已处理关键词: ${processedCount}
+- 有效新词数量: ${effectiveNewWords.length}
+- 任务结束类型: ${endType}
+- 任务结束原因: ${endReason}
 
 ----------------------------------------
 
 【有效新词列表】
-${data.effectiveNewWords.map((word, i) => `${i + 1}. ${word}`).join("\n")}
+${effectiveNewWords.length > 0 ? effectiveNewWords.map((word, i) => `${i + 1}. ${word}`).join("\n") : "无"}
 
 ========================================
 `
 }
 
 function updateState(newState) {
+  const wasActive = state.isActive
   state = { ...state, ...newState }
+
+  const reason = state.endReason || state.lastError || ""
+  if (wasActive && !state.isActive && reason) {
+    showResultNotice = true
+  }
+
   updateUI()
 }
 
@@ -196,9 +221,18 @@ function updateUI() {
   if (state.isActive) {
     inputSection?.classList.add("hidden")
     statusSection?.classList.remove("hidden")
+    resultNoticeEl?.classList.add("hidden")
   } else {
     inputSection?.classList.remove("hidden")
     statusSection?.classList.add("hidden")
+
+    const reason = state.endReason || state.lastError || ""
+    if (showResultNotice && reason) {
+      resultNoticeTextEl.textContent = reason
+      resultNoticeEl?.classList.remove("hidden")
+    } else {
+      resultNoticeEl?.classList.add("hidden")
+    }
   }
 
   currentKeywordEl.textContent = state.currentKeyword || "-"
@@ -207,6 +241,16 @@ function updateUI() {
   effectiveNewWordsCountEl.textContent = state.effectiveNewWordsCount
   currentDepthEl.textContent = state.currentDepth
   statusMessageEl.textContent = state.statusMessage
+
+  if (state.isActive) {
+    endReasonEl.textContent = "运行中"
+  } else if (state.endReason) {
+    endReasonEl.textContent = state.endReason
+  } else if (state.statusMessage === "未开始") {
+    endReasonEl.textContent = "未开始"
+  } else {
+    endReasonEl.textContent = "未记录"
+  }
 
   if (state.isActive) {
     statusBadgeEl.textContent = "运行中"

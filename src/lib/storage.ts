@@ -4,7 +4,8 @@ import type {
   CaptureState,
   HistoryRecord,
   CaptureOptions,
-  AnalysisResult
+  AnalysisResult,
+  CaptureReport
 } from "../types"
 
 const storage = new Storage({
@@ -197,6 +198,7 @@ export class KeywordStorage {
         queueSize: 0,
         effectiveNewWordsCount: 0,
         currentDepth: 0,
+        endReason: "",
         statusMessage: "未开始"
       }
     }
@@ -211,6 +213,7 @@ export class KeywordStorage {
         queueSize: 0,
         effectiveNewWordsCount: 0,
         currentDepth: 0,
+        endReason: "",
         statusMessage: "未开始"
       }
     }
@@ -246,6 +249,24 @@ export class KeywordStorage {
     await storage.setItem("captureOptions", JSON.stringify(options))
   }
 
+  static async getLastCaptureReport(): Promise<CaptureReport | null> {
+    const data = await storage.getItem<string>("lastCaptureReport")
+    if (!data) {
+      return null
+    }
+
+    try {
+      return JSON.parse(data)
+    } catch (error) {
+      console.error("解析任务报告失败:", error)
+      return null
+    }
+  }
+
+  static async setLastCaptureReport(report: CaptureReport | null): Promise<void> {
+    await storage.setItem("lastCaptureReport", JSON.stringify(report))
+  }
+
   /**
    * 清空所有数据
    */
@@ -253,6 +274,7 @@ export class KeywordStorage {
     await storage.setItem("effectiveNewWords", JSON.stringify([]))
     await storage.setItem("processedKeywords", JSON.stringify([]))
     await storage.setItem("keywordsQueue", JSON.stringify([]))
+    await this.setLastCaptureReport(null)
   }
 
   /**
@@ -262,13 +284,16 @@ export class KeywordStorage {
     effectiveNewWords: string[]
     processedKeywords: string[]
     timestamp: number
+    report: CaptureReport | null
   }> {
     const effective = await this.getEffectiveNewWords()
     const processed = await this.getProcessedKeywords()
+    const report = await this.getLastCaptureReport()
     return {
       effectiveNewWords: [...effective],
       processedKeywords: [...processed],
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      report
     }
   }
 }

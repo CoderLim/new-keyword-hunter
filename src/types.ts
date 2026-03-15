@@ -50,6 +50,8 @@ export interface AnalysisResult {
   avgValue?: number
 }
 
+export type CaptureEndType = "normal" | "abnormal"
+
 /**
  * 捕获状态
  */
@@ -63,6 +65,8 @@ export interface CaptureState {
   statusMessage: string
   maxKeywords?: number
   lastError?: string
+  endType?: CaptureEndType
+  endReason?: string
 }
 
 /**
@@ -78,6 +82,17 @@ export interface CaptureOptions {
   geo?: string
 }
 
+export interface CaptureReport {
+  timestamp: number
+  baseKeyword: string
+  seedKeywords: string[]
+  totalProcessed: number
+  effectiveNewWords: string[]
+  endType: CaptureEndType
+  endReason: string
+  durationMs: number
+}
+
 /**
  * 历史记录
  */
@@ -89,6 +104,8 @@ export interface HistoryRecord {
   totalProcessed: number
   effectiveNewWords: number
   duration: number
+  endType?: CaptureEndType
+  endReason?: string
   data?: {
     effectiveNewWords: string[]
     processedKeywords: string[]

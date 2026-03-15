@@ -85,6 +85,25 @@
         color: #777;
         line-height: 1.4;
       }
+      .result-notice {
+        margin-top: 0.75rem;
+        padding: 0.625rem 0.75rem;
+        border-radius: 6px;
+        border: 1px solid #f5c2c7;
+        background: #fff1f2;
+      }
+      .result-notice .title {
+        display: block;
+        font-size: 0.75rem;
+        color: #9f1239;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+      }
+      .result-notice .content {
+        font-size: 0.75rem;
+        color: #7f1d1d;
+        line-height: 1.4;
+      }
       .form-row {
         display: flex;
         gap: 0.75rem;
@@ -339,6 +358,11 @@
           </div>
 
           <button id="startBtn" class="btn-primary">开始挖掘</button>
+
+          <div id="resultNotice" class="result-notice hidden">
+            <span class="title">上次任务结束原因</span>
+            <span id="resultNoticeText" class="content">未记录</span>
+          </div>
         </div>
 
         <div id="statusSection" class="status-section hidden">
@@ -376,6 +400,11 @@
             <div class="status-item" style="grid-column: 1 / -1;">
               <span class="status-label">状态消息</span>
               <span id="statusMessage" class="status-value" style="font-size: 0.75rem;">未开始</span>
+            </div>
+
+            <div class="status-item" style="grid-column: 1 / -1;">
+              <span class="status-label">本次结束原因</span>
+              <span id="endReason" class="status-value" style="font-size: 0.75rem;">未开始</span>
             </div>
           </div>
 
