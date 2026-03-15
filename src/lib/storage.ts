@@ -7,7 +7,9 @@ import type {
   AnalysisResult
 } from "../types"
 
-const storage = new Storage()
+const storage = new Storage({
+  area: "local"
+})
 
 /**
  * 存储操作类

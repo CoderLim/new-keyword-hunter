@@ -15,7 +15,9 @@ import {
 } from "~lib/keyword-analyzer"
 import type { CaptureState, CaptureOptions, Message } from "~types"
 
-const storage = new Storage()
+const storage = new Storage({
+  area: "local"
+})
 const recentInterceptSignatures = new Map<string, number>()
 const timelineKeywordProcessedAt = new Map<string, number>()
 let isProcessingNextKeyword = false
