@@ -87,8 +87,8 @@ function handleStart() {
   const baseKeyword = document.getElementById("baseKeyword")?.value || ""
   const seedKeywordsText = document.getElementById("seedKeywords")?.value || ""
   const timeRange = document.getElementById("timeRange")?.value || "today 12-m"
-  const geo = document.getElementById("geo")?.value || "CN"
-  const threshold = parseInt(document.getElementById("threshold")?.value || "10", 10)
+  const geo = document.getElementById("geo")?.value || ""
+  const threshold = parseInt(document.getElementById("threshold")?.value || "20", 10)
   const maxKeywords = parseInt(document.getElementById("maxKeywords")?.value || "100", 10)
 
   const seeds = seedKeywordsText

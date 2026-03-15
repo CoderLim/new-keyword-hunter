@@ -118,11 +118,12 @@ export function buildTrendsUrl(
 export function buildRelatedSearchesUrl(keyword: string, timeRange: string = "today 12-m", geo: string = ""): string {
   const hl = "zh-CN"
   const tz = 480
+  const resolvedGeo = geo === undefined ? "CN" : geo
   const params = new URLSearchParams({
     hl,
     tz: tz.toString(),
     date: timeRange,
-    geo: geo || "CN",
+    geo: resolvedGeo,
     gprop: "",
     q: keyword
   })
@@ -136,11 +137,12 @@ export function buildRelatedSearchesUrl(keyword: string, timeRange: string = "to
 export function buildTimelineUrl(keyword: string, timeRange: string = "today 12-m", geo: string = ""): string {
   const hl = "zh-CN"
   const tz = 480
+  const resolvedGeo = geo === undefined ? "CN" : geo
   const params = new URLSearchParams({
     hl,
     tz: tz.toString(),
     date: timeRange,
-    geo: geo || "CN",
+    geo: resolvedGeo,
     q: keyword,
     // 设备类型: all (全部), web (桌面), searches (搜索)
     gprop: ""

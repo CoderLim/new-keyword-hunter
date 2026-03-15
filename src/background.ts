@@ -204,7 +204,8 @@ async function processNextKeyword(): Promise<boolean> {
     await sendStatusUpdate(newState)
 
     // 打开 Trends 页面
-    const url = `https://trends.google.com/trends/explore?q=${encodeURIComponent(nextKeyword)}&date=${encodeURIComponent(options.timeRange)}&geo=${options.geo || "CN"}`
+    const resolvedGeo = options.geo === undefined ? "CN" : options.geo
+    const url = `https://trends.google.com/trends/explore?q=${encodeURIComponent(nextKeyword)}&date=${encodeURIComponent(options.timeRange)}&geo=${encodeURIComponent(resolvedGeo)}`
 
     // 查找或创建 Trends 标签页
     const tabs = await chrome.tabs.query({ url: "*://trends.google.com/*" })
