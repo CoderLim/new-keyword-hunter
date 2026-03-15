@@ -85,12 +85,14 @@ export const InputSection: React.FC<InputSectionProps> = ({ onStart, disabled })
             onChange={(e) => setGeo(e.target.value)}
             disabled={disabled}
           >
-            <option value="CN">中国</option>
-            <option value="US">美国</option>
             <option value="">全球</option>
+            <option value="US">美国</option>
             <option value="JP">日本</option>
             <option value="KR">韩国</option>
             <option value="GB">英国</option>
+            <option value="FR">法国</option>
+            <option value="DE">德国</option>
+            <option value="CN">中国</option>
           </select>
         </div>
       </div>
