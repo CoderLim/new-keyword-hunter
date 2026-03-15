@@ -90,6 +90,7 @@ function handleStart() {
   const geo = document.getElementById("geo")?.value || ""
   const threshold = parseInt(document.getElementById("threshold")?.value || "20", 10)
   const maxKeywords = parseInt(document.getElementById("maxKeywords")?.value || "100", 10)
+  const relatedQueryLimit = parseInt(document.getElementById("relatedQueryLimit")?.value || "15", 10)
 
   const seeds = seedKeywordsText
     .split(/[,，\n]/)
@@ -102,6 +103,7 @@ function handleStart() {
     timeRange,
     threshold,
     maxKeywords,
+    relatedQueryLimit,
     geo
   }
 

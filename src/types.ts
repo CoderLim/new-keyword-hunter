@@ -74,6 +74,7 @@ export interface CaptureOptions {
   timeRange: string
   threshold: number
   maxKeywords: number
+  relatedQueryLimit?: number
   geo?: string
 }
 

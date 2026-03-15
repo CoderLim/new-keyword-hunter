@@ -6,7 +6,13 @@ import {
   parseRelatedQueries,
   extractKeywordFromUrl
 } from "~lib/trends"
-import { filterLowValueKeywords, parseTimelineResponse, isNewWordEffective } from "~lib/keyword-analyzer"
+import {
+  filterLowValueKeywords,
+  parseTimelineResponse,
+  parseTimelineSeriesValues,
+  isNewWordEffective,
+  isNewWordEffectiveByBase
+} from "~lib/keyword-analyzer"
 import type { CaptureState, CaptureOptions, Message } from "~types"
 
 const storage = new Storage()
@@ -205,7 +211,16 @@ async function processNextKeyword(): Promise<boolean> {
 
     // 打开 Trends 页面
     const resolvedGeo = options.geo === undefined ? "CN" : options.geo
-    const url = `https://trends.google.com/trends/explore?q=${encodeURIComponent(nextKeyword)}&date=${encodeURIComponent(options.timeRange)}&geo=${encodeURIComponent(resolvedGeo)}`
+    const baseKeyword = options.baseKeyword.trim()
+    const queryKeywords =
+      baseKeyword && baseKeyword !== nextKeyword
+        ? [baseKeyword, nextKeyword]
+        : [nextKeyword]
+    const encodedQueryKeywords = queryKeywords
+      .map((keyword) => encodeURIComponent(keyword))
+      .join(",")
+
+    const url = `https://trends.google.com/trends/explore?q=${encodedQueryKeywords}&date=${encodeURIComponent(options.timeRange)}&geo=${encodeURIComponent(resolvedGeo)}`
 
     // 查找或创建 Trends 标签页
     const tabs = await chrome.tabs.query({ url: "*://trends.google.com/*" })
@@ -347,6 +362,12 @@ async function handleInterceptedData(url: string, responseBody: string) {
 
   // 处理相关搜索
   if (isRelatedSearchesRequest(url)) {
+    const baseKeyword = options.baseKeyword.trim()
+
+    if (baseKeyword && keyword === baseKeyword) {
+      return
+    }
+
     const { rising, top } = parseRelatedQueries(responseBody)
 
     // 合并 rising 和 top，去重
@@ -356,11 +377,18 @@ async function handleInterceptedData(url: string, responseBody: string) {
     const filtered = filterLowValueKeywords(allQueries)
 
     // 过滤掉当前关键词本身
-    const others = filtered.filter((q) => q !== keyword)
+    const others = filtered.filter((q) => q !== keyword && q !== baseKeyword)
+    const relatedQueryLimit = options.relatedQueryLimit ?? 0
+    const selectedCandidates =
+      relatedQueryLimit > 0 ? others.slice(0, relatedQueryLimit) : others
 
-    if (others.length > 0) {
-      await KeywordStorage.addToQueue(others)
-      console.log("[NKH] 追加关键词到队列", { currentKeyword: keyword, added: others.length })
+    if (selectedCandidates.length > 0) {
+      await KeywordStorage.addToQueue(selectedCandidates)
+      console.log("[NKH] 追加关键词到队列", {
+        currentKeyword: keyword,
+        added: selectedCandidates.length,
+        relatedQueryLimit
+      })
 
       // 同步队列大小并更新状态
       const queueSize = await syncQueueSize()
@@ -379,38 +407,61 @@ async function handleInterceptedData(url: string, responseBody: string) {
 
   // 处理时间线数据
   if (isTimelineRequest(url)) {
+    const processingKeyword = state.currentKeyword?.trim() || keyword
+
+    if (!processingKeyword) {
+      return
+    }
+
     const now = Date.now()
-    const lastProcessedAt = timelineKeywordProcessedAt.get(keyword) || 0
+    const lastProcessedAt = timelineKeywordProcessedAt.get(processingKeyword) || 0
 
     if (now - lastProcessedAt < 3000) {
       return
     }
 
-    timelineKeywordProcessedAt.set(keyword, now)
+    timelineKeywordProcessedAt.set(processingKeyword, now)
 
-    // responseBody is the raw JSON string from Trends API
-    const timeline = parseTimelineResponse(responseBody, options.timeRange)
+    const baseKeyword = options.baseKeyword.trim()
+    const timelineSeries = parseTimelineSeriesValues(responseBody)
 
-    if (!timeline || timeline.length === 0) {
+    let timelinePoints = 0
+    let isEffective = false
+
+    if (baseKeyword && processingKeyword !== baseKeyword && timelineSeries.length >= 2) {
+      const baseTimeline = timelineSeries[0]
+      const candidateTimeline = timelineSeries[1]
+      timelinePoints = candidateTimeline.length
+      isEffective = isNewWordEffectiveByBase(
+        candidateTimeline,
+        baseTimeline,
+        options.threshold
+      )
+    } else {
+      const timeline = parseTimelineResponse(responseBody, options.timeRange)
+      timelinePoints = timeline.length
+      isEffective = isNewWordEffective(timeline, options.threshold, options.timeRange)
+    }
+
+    if (timelinePoints === 0) {
       // 处理下一个关键词
       setTimeout(() => processNextKeyword(), 2000)
       return
     }
 
-    const isEffective = isNewWordEffective(timeline, options.threshold, options.timeRange)
     console.log("[NKH] 时间线分析完成", {
-      keyword,
-      timelinePoints: timeline.length,
+      keyword: processingKeyword,
+      timelinePoints,
       isEffective
     })
 
     if (isEffective) {
-      await KeywordStorage.addEffectiveNewWord(keyword)
+      await KeywordStorage.addEffectiveNewWord(processingKeyword)
 
       // 发送消息到 side-panel
       chrome.runtime.sendMessage({
         type: "EFFECTIVE_WORD_FOUND",
-        payload: { keyword, timeline }
+        payload: { keyword: processingKeyword }
       })
 
       const effective = await KeywordStorage.getEffectiveNewWords()

@@ -97,7 +97,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onStart, disabled })
 
       <div className="form-row">
         <div className="form-group">
-          <label htmlFor="threshold">阈值 (后期平均值)</label>
+          <label htmlFor="threshold">阈值 (相对基准词百分比)</label>
           <input
             id="threshold"
             type="number"

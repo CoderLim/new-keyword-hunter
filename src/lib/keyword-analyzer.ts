@@ -5,6 +5,73 @@ import type {
 } from "../types"
 import { cleanTrendsData } from "./trends"
 
+function parseTrendValue(rawValue: unknown): number {
+  if (typeof rawValue === "number") {
+    return rawValue
+  }
+
+  if (typeof rawValue === "string") {
+    if (rawValue.includes("<1")) {
+      return 0
+    }
+
+    const normalized = rawValue.replace(/,/g, "").trim()
+    return parseInt(normalized, 10) || 0
+  }
+
+  return 0
+}
+
+export function parseTimelineSeriesValues(jsonResponse: string): number[][] {
+  if (!jsonResponse) {
+    return []
+  }
+
+  try {
+    const cleaned = cleanTrendsData(jsonResponse)
+    const data = JSON.parse(cleaned)
+    const timelineData = data.default?.timelineData
+
+    if (!Array.isArray(timelineData) || timelineData.length === 0) {
+      return []
+    }
+
+    const firstItem = timelineData[0] as {
+      value?: unknown
+      formattedValue?: unknown
+    }
+
+    const firstSeriesSource =
+      Array.isArray(firstItem?.value)
+        ? firstItem.value
+        : Array.isArray(firstItem?.formattedValue)
+          ? firstItem.formattedValue
+          : [firstItem?.value ?? firstItem?.formattedValue ?? 0]
+
+    const seriesCount = Math.max(1, firstSeriesSource.length)
+    const seriesValues = Array.from({ length: seriesCount }, () => [] as number[])
+
+    for (const item of timelineData as Array<{ value?: unknown; formattedValue?: unknown }>) {
+      const sourceValues =
+        Array.isArray(item.value)
+          ? item.value
+          : Array.isArray(item.formattedValue)
+            ? item.formattedValue
+            : [item.value ?? item.formattedValue ?? 0]
+
+      for (let index = 0; index < seriesCount; index += 1) {
+        const rawValue = sourceValues[index] ?? 0
+        seriesValues[index].push(parseTrendValue(rawValue))
+      }
+    }
+
+    return seriesValues
+  } catch (error) {
+    console.error("解析时间线序列失败:", error)
+    return []
+  }
+}
+
 /**
  * 解析时间线数据 (从 JSON 响应)
  * Google Trends API 返回的是 JSON，需要先提取 timelineData
@@ -29,10 +96,15 @@ export function parseTimelineResponse(
 
     // 转换为 "时间,值" 格式
     const formattedData = timelineData
-      .map((item: { time: string; formattedValue: string }) => {
-        const value = item.formattedValue || "0"
-        const numValue = value.includes("<1") ? "0" : value
-        return `${item.time},${numValue}`
+      .map((item: { time: string; value?: unknown; formattedValue?: unknown }) => {
+        const firstSeriesValue =
+          Array.isArray(item.value)
+            ? item.value[0]
+            : Array.isArray(item.formattedValue)
+              ? item.formattedValue[0]
+              : item.value ?? item.formattedValue ?? "0"
+
+        return `${item.time},${parseTrendValue(firstSeriesValue)}`
       })
       .join("\n")
 
@@ -119,6 +191,42 @@ export function isNewWordEffective(
     lastPoints.reduce((sum, p) => sum + p.value, 0) / lastPoints.length
 
   return avgLastValue >= threshold
+}
+
+export function isNewWordEffectiveByBase(
+  candidateTimeline: number[],
+  baseTimeline: number[],
+  threshold: number = 20
+): boolean {
+  if (candidateTimeline.length < 6 || baseTimeline.length < 6) {
+    return false
+  }
+
+  const checkFirstPoints = Math.min(5, Math.floor(candidateTimeline.length / 3))
+  const allFirstZero = candidateTimeline
+    .slice(0, checkFirstPoints)
+    .every((value) => value === 0)
+
+  if (!allFirstZero) {
+    return false
+  }
+
+  const candidateLastFive = candidateTimeline.slice(-5)
+  const baseLastFive = baseTimeline.slice(-5)
+
+  const candidateLastFiveAvg =
+    candidateLastFive.reduce((sum, value) => sum + value, 0) / candidateLastFive.length
+
+  const baseLastFiveAvg =
+    baseLastFive.reduce((sum, value) => sum + value, 0) / baseLastFive.length
+
+  if (baseLastFiveAvg <= 0) {
+    return false
+  }
+
+  const percentage = (candidateLastFiveAvg / baseLastFiveAvg) * 100
+
+  return percentage >= threshold
 }
 
 /**
