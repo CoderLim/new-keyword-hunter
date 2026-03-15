@@ -8,9 +8,10 @@ const manifestPath = process.argv[2] || 'build/chrome-mv3-prod/manifest.json'
 try {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
 
-  // Add side_panel if not present
-  if (!manifest.side_panel) {
+  // Ensure side_panel default path exists
+  if (!manifest.side_panel || !manifest.side_panel.default_path) {
     manifest.side_panel = {
+      ...(manifest.side_panel || {}),
       default_path: 'side-panel.html'
     }
   }

@@ -4,14 +4,86 @@ import {
   isRelatedSearchesRequest,
   isTimelineRequest,
   parseRelatedQueries,
-  extractKeywordFromUrl,
-  extractTimeRangeFromUrl,
-  extractGeoFromUrl
+  extractKeywordFromUrl
 } from "~lib/trends"
 import { filterLowValueKeywords, parseTimelineResponse, isNewWordEffective } from "~lib/keyword-analyzer"
 import type { CaptureState, CaptureOptions, Message } from "~types"
 
 const storage = new Storage()
+const recentInterceptSignatures = new Map<string, number>()
+const timelineKeywordProcessedAt = new Map<string, number>()
+let isProcessingNextKeyword = false
+let emptyQueueRetryCount = 0
+const MAX_EMPTY_QUEUE_RETRY = 4
+
+function isDuplicateIntercept(url: string, responseBody: string): boolean {
+  const now = Date.now()
+
+  for (const [key, timestamp] of recentInterceptSignatures.entries()) {
+    if (now - timestamp > 60000) {
+      recentInterceptSignatures.delete(key)
+    }
+  }
+
+  const signature = `${url}|${responseBody.length}|${responseBody.slice(0, 120)}`
+
+  if (recentInterceptSignatures.has(signature)) {
+    return true
+  }
+
+  recentInterceptSignatures.set(signature, now)
+  return false
+}
+
+async function setupSidePanelBehavior() {
+  if (!chrome.sidePanel?.setPanelBehavior) {
+    return
+  }
+
+  try {
+    await chrome.sidePanel.setPanelBehavior({
+      openPanelOnActionClick: true
+    })
+  } catch (error) {
+    console.error("设置侧边栏点击行为失败:", error)
+  }
+}
+
+async function openSidePanelForTab(tab?: chrome.tabs.Tab) {
+  if (!chrome.sidePanel?.open) {
+    return
+  }
+
+  try {
+    if (tab?.id && chrome.sidePanel.setOptions) {
+      await chrome.sidePanel.setOptions({
+        tabId: tab.id,
+        path: "side-panel.html",
+        enabled: true
+      })
+    }
+
+    if (typeof tab?.windowId === "number") {
+      await chrome.sidePanel.open({ windowId: tab.windowId })
+    }
+  } catch (error) {
+    console.error("通过图标点击打开侧边栏失败:", error)
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void setupSidePanelBehavior()
+})
+
+chrome.runtime.onStartup.addListener(() => {
+  void setupSidePanelBehavior()
+})
+
+chrome.action.onClicked.addListener((tab) => {
+  void openSidePanelForTab(tab)
+})
+
+void setupSidePanelBehavior()
 
 // 存储拦截的响应数据
 const interceptedResponses = new Map<string, string>()
@@ -43,75 +115,143 @@ async function syncQueueSize(): Promise<number> {
  * 处理下一个关键词
  */
 async function processNextKeyword(): Promise<boolean> {
-  const state = await KeywordStorage.getCaptureState()
-  const options = await KeywordStorage.getCaptureOptions()
-
-  if (!state.isActive || !options) {
+  if (isProcessingNextKeyword) {
     return false
   }
 
-  // 检查是否达到最大关键词数
-  if (options.maxKeywords > 0 && state.processedCount >= options.maxKeywords) {
-    await stopCapture()
-    return false
-  }
+  isProcessingNextKeyword = true
 
-  const nextKeyword = await KeywordStorage.getNextKeyword()
+  try {
+    const state = await KeywordStorage.getCaptureState()
+    const options = await KeywordStorage.getCaptureOptions()
 
-  if (!nextKeyword) {
-    // 队列为空，等待其他请求填充
+    if (!state.isActive || !options) {
+      return false
+    }
+
+    // 检查是否达到最大关键词数
+    if (options.maxKeywords > 0 && state.processedCount >= options.maxKeywords) {
+      await stopCapture()
+      return false
+    }
+
+    const nextKeyword = await KeywordStorage.getNextKeyword()
+    console.log("[NKH] processNextKeyword", {
+      nextKeyword,
+      processedCount: state.processedCount,
+      queueSize: state.queueSize
+    })
+
+    if (!nextKeyword) {
+      // 队列为空，等待其他请求填充
+      const queueSize = await syncQueueSize()
+
+      if (queueSize > 0) {
+        setTimeout(() => processNextKeyword(), 1500)
+        return false
+      }
+
+      emptyQueueRetryCount += 1
+
+      if (emptyQueueRetryCount >= MAX_EMPTY_QUEUE_RETRY) {
+        const effective = await KeywordStorage.getEffectiveNewWords()
+        const completedState: CaptureState = {
+          ...state,
+          isActive: false,
+          currentKeyword: "",
+          queueSize: 0,
+          effectiveNewWordsCount: effective.size,
+          statusMessage: `挖掘完成：已处理 ${state.processedCount}，有效新词 ${effective.size}`
+        }
+        await KeywordStorage.setCaptureState(completedState)
+        await sendStatusUpdate(completedState)
+        return false
+      }
+
+      await KeywordStorage.setCaptureState({
+        ...state,
+        queueSize,
+        statusMessage: "等待新关键词...",
+        currentKeyword: ""
+      })
+      await sendStatusUpdate({
+        queueSize,
+        statusMessage: "等待新关键词...",
+        currentKeyword: ""
+      })
+
+      setTimeout(() => processNextKeyword(), 1500)
+      return false
+    }
+
+    emptyQueueRetryCount = 0
+
+    // 标记为已处理
+    await KeywordStorage.addProcessedKeyword(nextKeyword)
+
+    // 同步队列大小
     const queueSize = await syncQueueSize()
-    await KeywordStorage.setCaptureState({
+
+    // 更新状态
+    const newState: CaptureState = {
       ...state,
+      currentKeyword: nextKeyword,
+      processedCount: state.processedCount + 1,
       queueSize,
-      statusMessage: "等待新关键词...",
-      currentKeyword: ""
-    })
-    await sendStatusUpdate({
-      queueSize,
-      statusMessage: "等待新关键词...",
-      currentKeyword: ""
-    })
-    return false
+      statusMessage: `正在处理: ${nextKeyword}`
+    }
+    await KeywordStorage.setCaptureState(newState)
+    await sendStatusUpdate(newState)
+
+    // 打开 Trends 页面
+    const url = `https://trends.google.com/trends/explore?q=${encodeURIComponent(nextKeyword)}&date=${encodeURIComponent(options.timeRange)}&geo=${options.geo || "CN"}`
+
+    // 查找或创建 Trends 标签页
+    const tabs = await chrome.tabs.query({ url: "*://trends.google.com/*" })
+    let trendsTab = tabs.find((t) => t.url?.includes("trends.google.com"))
+
+    if (trendsTab && trendsTab.id) {
+      await chrome.tabs.update(trendsTab.id, {
+        url,
+        active: true
+      })
+      if (chrome.sidePanel?.setOptions) {
+        await chrome.sidePanel.setOptions({
+          tabId: trendsTab.id,
+          path: "side-panel.html",
+          enabled: true
+        })
+      }
+      await openSidePanelForTab(trendsTab)
+    } else {
+      const created = await chrome.tabs.create({
+        url,
+        active: true
+      })
+      if (created.id && chrome.sidePanel?.setOptions) {
+        await chrome.sidePanel.setOptions({
+          tabId: created.id,
+          path: "side-panel.html",
+          enabled: true
+        })
+      }
+      await openSidePanelForTab(created)
+    }
+
+    return true
+  } finally {
+    isProcessingNextKeyword = false
   }
-
-  // 标记为已处理
-  await KeywordStorage.addProcessedKeyword(nextKeyword)
-
-  // 同步队列大小
-  const queueSize = await syncQueueSize()
-
-  // 更新状态
-  const newState: CaptureState = {
-    ...state,
-    currentKeyword: nextKeyword,
-    processedCount: state.processedCount + 1,
-    queueSize,
-    statusMessage: `正在处理: ${nextKeyword}`
-  }
-  await KeywordStorage.setCaptureState(newState)
-  await sendStatusUpdate(newState)
-
-  // 打开 Trends 页面
-  const url = `https://trends.google.com/trends/explore?q=${encodeURIComponent(nextKeyword)}&date=${encodeURIComponent(options.timeRange)}&geo=${options.geo || "CN"}`
-
-  // 查找或创建 Trends 标签页
-  const tabs = await chrome.tabs.query({ url: "*://trends.google.com/*" })
-  let trendsTab = tabs.find((t) => t.url?.includes("trends.google.com"))
-
-  if (trendsTab && trendsTab.id) {
-    await chrome.tabs.update(trendsTab.id, { url })
-  } else {
-    await chrome.tabs.create({ url })
-  }
-
-  return true
 }
 
 /**
  * 开始捕获
  */
 async function startCapture(options: CaptureOptions) {
+  emptyQueueRetryCount = 0
+  recentInterceptSignatures.clear()
+  timelineKeywordProcessedAt.clear()
+
   // 初始化
   await KeywordStorage.clearAll()
   await KeywordStorage.setCaptureOptions(options)
@@ -187,11 +327,22 @@ async function handleInterceptedData(url: string, responseBody: string) {
     return
   }
 
-  const keyword = extractKeywordFromUrl(url)
-
-  if (!keyword) {
+  if (isDuplicateIntercept(url, responseBody)) {
     return
   }
+
+  const keyword = extractKeywordFromUrl(url) || state.currentKeyword?.trim()
+
+  if (!keyword) {
+    console.warn("[NKH] 无法从请求提取关键词", { url })
+    return
+  }
+
+  console.log("[NKH] 收到拦截数据", {
+    type: isRelatedSearchesRequest(url) ? "related" : isTimelineRequest(url) ? "timeline" : "other",
+    keyword,
+    url
+  })
 
   // 处理相关搜索
   if (isRelatedSearchesRequest(url)) {
@@ -208,6 +359,7 @@ async function handleInterceptedData(url: string, responseBody: string) {
 
     if (others.length > 0) {
       await KeywordStorage.addToQueue(others)
+      console.log("[NKH] 追加关键词到队列", { currentKeyword: keyword, added: others.length })
 
       // 同步队列大小并更新状态
       const queueSize = await syncQueueSize()
@@ -226,6 +378,15 @@ async function handleInterceptedData(url: string, responseBody: string) {
 
   // 处理时间线数据
   if (isTimelineRequest(url)) {
+    const now = Date.now()
+    const lastProcessedAt = timelineKeywordProcessedAt.get(keyword) || 0
+
+    if (now - lastProcessedAt < 3000) {
+      return
+    }
+
+    timelineKeywordProcessedAt.set(keyword, now)
+
     // responseBody is the raw JSON string from Trends API
     const timeline = parseTimelineResponse(responseBody, options.timeRange)
 
@@ -236,6 +397,11 @@ async function handleInterceptedData(url: string, responseBody: string) {
     }
 
     const isEffective = isNewWordEffective(timeline, options.threshold, options.timeRange)
+    console.log("[NKH] 时间线分析完成", {
+      keyword,
+      timelinePoints: timeline.length,
+      isEffective
+    })
 
     if (isEffective) {
       await KeywordStorage.addEffectiveNewWord(keyword)
@@ -256,6 +422,53 @@ async function handleInterceptedData(url: string, responseBody: string) {
     setTimeout(() => processNextKeyword(), 2000)
   }
 }
+
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    void (async () => {
+      if (details.tabId < 0) {
+        return
+      }
+
+      if (
+        details.initiator &&
+        details.initiator.startsWith(`chrome-extension://${chrome.runtime.id}`)
+      ) {
+        return
+      }
+
+      const state = await KeywordStorage.getCaptureState()
+      if (!state.isActive) {
+        return
+      }
+
+      const url = details.url
+      if (!(isRelatedSearchesRequest(url) || isTimelineRequest(url))) {
+        return
+      }
+
+      console.log("[NKH] webRequest 捕获到 Trends API", { url })
+
+      try {
+        const response = await fetch(url, {
+          credentials: "include"
+        })
+
+        if (!response.ok) {
+          return
+        }
+
+        const body = await response.text()
+        await handleInterceptedData(url, body)
+      } catch (error) {
+        console.warn("[NKH] webRequest 回补响应失败", { url, error })
+      }
+    })()
+  },
+  {
+    urls: ["*://trends.google.com/trends/api/widgetdata/*"]
+  }
+)
 
 /**
  * 监听消息

@@ -3,6 +3,7 @@ import type {
   KeywordData,
   AnalysisResult
 } from "../types"
+import { cleanTrendsData } from "./trends"
 
 /**
  * 解析时间线数据 (从 JSON 响应)
@@ -17,15 +18,7 @@ export function parseTimelineResponse(
   }
 
   try {
-    // 移除可能的特殊前缀
-    let cleaned = jsonResponse
-    const prefixes = [")]}'", ")]}'\n", ")]}'\\n", "//", "/*"]
-    for (const prefix of prefixes) {
-      if (cleaned.startsWith(prefix)) {
-        cleaned = cleaned.slice(prefix.length)
-        break
-      }
-    }
+    const cleaned = cleanTrendsData(jsonResponse)
 
     const data = JSON.parse(cleaned)
     const timelineData = data.default?.timelineData
