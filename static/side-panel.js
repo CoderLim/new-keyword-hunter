@@ -41,6 +41,24 @@ function init() {
   loadState()
   setupEventListeners()
   setupMessageListener()
+  setupAdvancedToggle()
+}
+
+function setupAdvancedToggle() {
+  const advancedToggle = document.getElementById("advancedToggle")
+  const advancedOptions = document.getElementById("advancedOptions")
+
+  advancedToggle?.addEventListener("click", () => {
+    const isExpanded = advancedOptions?.classList.contains("expanded")
+
+    if (isExpanded) {
+      advancedOptions?.classList.remove("expanded")
+      advancedToggle?.classList.remove("expanded")
+    } else {
+      advancedOptions?.classList.add("expanded")
+      advancedToggle?.classList.add("expanded")
+    }
+  })
 }
 
 function setupEventListeners() {

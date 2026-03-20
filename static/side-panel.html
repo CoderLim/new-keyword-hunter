@@ -6,12 +6,17 @@
     <title>新词挖掘助手</title>
     <style>
       /* Global styles */
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
         padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: #f5f5f5;
-        color: #333;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+        background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+        color: #212529;
+        font-size: 14px;
+        line-height: 1.5;
       }
       .container {
         width: 100%;
@@ -23,237 +28,490 @@
       .header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 1rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        padding: 1.25rem 1rem;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        position: sticky;
+        top: 0;
+        z-index: 10;
       }
       .header h1 {
         margin: 0;
-        font-size: 1.25rem;
-        font-weight: 600;
+        font-size: 1.375rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
       }
       .subtitle {
-        margin: 0.25rem 0 0 0;
-        font-size: 0.75rem;
-        opacity: 0.9;
+        margin: 0.375rem 0 0 0;
+        font-size: 0.8125rem;
+        opacity: 0.92;
+        font-weight: 400;
       }
       /* Main content */
       .main {
         flex: 1;
         overflow-y: auto;
-        padding: 1rem;
+        padding: 1.25rem;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
+        gap: 1.25rem;
       }
       /* Form styles */
       .input-section {
         background: white;
-        border-radius: 8px;
-        padding: 1rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+      }
+      .section-title {
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: #495057;
+        margin: 0 0 1rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .section-divider {
+        height: 1px;
+        background: linear-gradient(90deg, #e9ecef 0%, transparent 100%);
+        margin: 1.25rem 0;
       }
       .form-group {
-        margin-bottom: 1rem;
+        margin-bottom: 1.125rem;
+      }
+      .form-group:last-child {
+        margin-bottom: 0;
       }
       .form-group label {
         display: block;
-        font-size: 0.75rem;
-        font-weight: 500;
-        color: #666;
-        margin-bottom: 0.25rem;
-        text-transform: uppercase;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 0.375rem;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+      }
+      .form-group label::before {
+        content: "•";
+        color: #667eea;
+        font-weight: bold;
       }
       .form-group input,
       .form-group select,
       .form-group textarea {
         width: 100%;
-        padding: 0.5rem;
-        border: 1px solid #ddd;
-        border-radius: 4px;
+        padding: 0.625rem 0.75rem;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
         font-size: 0.875rem;
-        box-sizing: border-box;
+        font-family: inherit;
+        transition: all 0.2s ease;
+        background: #f8f9fa;
+      }
+      .form-group input:hover,
+      .form-group select:hover,
+      .form-group textarea:hover {
+        border-color: #dee2e6;
+        background: white;
       }
       .form-group input:focus,
       .form-group select:focus,
       .form-group textarea:focus {
         outline: none;
         border-color: #667eea;
+        background: white;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
+      .form-group textarea {
+        resize: vertical;
+        min-height: 80px;
       }
       .form-help {
-        margin-top: 0.25rem;
-        font-size: 0.6875rem;
-        color: #777;
-        line-height: 1.4;
+        margin-top: 0.375rem;
+        font-size: 0.75rem;
+        color: #6c757d;
+        line-height: 1.5;
+        padding-left: 0.5rem;
+        border-left: 2px solid #e9ecef;
       }
       .result-notice {
-        margin-top: 0.75rem;
-        padding: 0.625rem 0.75rem;
-        border-radius: 6px;
-        border: 1px solid #f5c2c7;
-        background: #fff1f2;
+        margin-top: 1rem;
+        padding: 0.875rem 1rem;
+        border-radius: 8px;
+        border: 1px solid #f8d7da;
+        background: linear-gradient(135deg, #fff5f5 0%, #ffe5e5 100%);
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+      }
+      .result-notice::before {
+        content: "ℹ";
+        font-size: 1.25rem;
+        color: #dc3545;
+        font-weight: bold;
+        flex-shrink: 0;
       }
       .result-notice .title {
         display: block;
-        font-size: 0.75rem;
-        color: #9f1239;
+        font-size: 0.8125rem;
+        color: #b02a37;
         font-weight: 600;
         margin-bottom: 0.25rem;
       }
       .result-notice .content {
-        font-size: 0.75rem;
-        color: #7f1d1d;
-        line-height: 1.4;
+        font-size: 0.8125rem;
+        color: #842029;
+        line-height: 1.5;
       }
       .form-row {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+      }
+      .advanced-section {
+        margin-top: 0.5rem;
+      }
+      .advanced-toggle {
+        background: none;
+        border: none;
+        color: #667eea;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        padding: 0.5rem 0;
         display: flex;
-        gap: 0.75rem;
+        align-items: center;
+        gap: 0.375rem;
+        transition: all 0.2s;
+      }
+      .advanced-toggle:hover {
+        color: #5568d3;
+      }
+      .advanced-toggle::before {
+        content: "▶";
+        font-size: 0.625rem;
+        transition: transform 0.2s;
+      }
+      .advanced-toggle.expanded::before {
+        transform: rotate(90deg);
+      }
+      .advanced-options {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+      }
+      .advanced-options.expanded {
+        max-height: 500px;
       }
       .btn-primary {
         width: 100%;
-        padding: 0.75rem;
+        padding: 0.875rem 1rem;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         border: none;
-        border-radius: 6px;
-        font-size: 0.875rem;
-        font-weight: 500;
+        border-radius: 10px;
+        font-size: 0.9375rem;
+        font-weight: 600;
         cursor: pointer;
+        transition: all 0.2s ease;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.25);
+        position: relative;
+        overflow: hidden;
+      }
+      .btn-primary::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        transition: left 0.5s;
+      }
+      .btn-primary:hover:not(:disabled)::before {
+        left: 100%;
       }
       .btn-primary:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(102, 126, 234, 0.35);
+      }
+      .btn-primary:active:not(:disabled) {
+        transform: translateY(0);
       }
       .btn-primary:disabled {
-        opacity: 0.6;
+        opacity: 0.5;
         cursor: not-allowed;
+        box-shadow: none;
       }
       /* Status section */
       .status-section {
         background: white;
-        border-radius: 8px;
-        padding: 1rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        border: 1px solid rgba(0, 0, 0, 0.05);
       }
       .status-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 1rem;
+        margin-bottom: 1.25rem;
       }
       .status-header h3 {
         margin: 0;
-        font-size: 0.875rem;
+        font-size: 0.9375rem;
         font-weight: 600;
+        color: #495057;
       }
       .status-badge {
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
+        padding: 0.375rem 0.75rem;
+        border-radius: 20px;
         font-size: 0.75rem;
-        font-weight: 500;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+      }
+      .status-badge::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
       }
       .status-badge.active {
-        background: #e6f4ea;
-        color: #1e8e3e;
+        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+        color: #155724;
+        box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
+      }
+      .status-badge.active::before {
+        background: #28a745;
       }
       .status-badge.inactive {
-        background: #f8f9fa;
-        color: #666;
+        background: #e9ecef;
+        color: #6c757d;
+      }
+      .status-badge.inactive::before {
+        background: #6c757d;
+        animation: none;
       }
       .status-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.25rem;
       }
       .status-item {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        padding: 0.875rem;
+        border-radius: 10px;
         display: flex;
         flex-direction: column;
-        gap: 0.125rem;
+        gap: 0.375rem;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        transition: all 0.2s;
+      }
+      .status-item:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
       }
       .status-label {
-        font-size: 0.625rem;
-        color: #888;
+        font-size: 0.6875rem;
+        color: #6c757d;
         text-transform: uppercase;
+        font-weight: 600;
+        letter-spacing: 0.05em;
       }
       .status-value {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #333;
+        font-size: 1.125rem;
+        font-weight: 700;
+        color: #212529;
+        font-variant-numeric: tabular-nums;
       }
       .status-value.highlight {
         color: #667eea;
-        font-size: 1rem;
+        font-size: 1.5rem;
+      }
+      .status-item.full-width {
+        grid-column: 1 / -1;
+        background: white;
+        border: 2px dashed #dee2e6;
+      }
+      .status-item.full-width .status-value {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: #495057;
       }
       .actions {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
         gap: 0.75rem;
       }
       .btnPause,
       .btnResume,
       .btnStop,
       .btnExport {
-        flex: 1;
-        padding: 0.75rem;
-        border: 1px solid;
-        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        border: 2px solid;
+        border-radius: 10px;
         font-size: 0.875rem;
-        font-weight: 500;
+        font-weight: 600;
         cursor: pointer;
-        transition: all 0.2s;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.375rem;
       }
       .btnPause {
-        background: #fff8e1;
-        color: #f57c00;
-        border-color: #ffe0b2;
+        background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%);
+        color: #e67e00;
+        border-color: #ffc107;
       }
       .btnPause:hover {
-        background: #ffecb3;
+        background: #ffc107;
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3);
+      }
+      .btnPause::before {
+        content: "⏸";
+        font-size: 1rem;
       }
       .btnResume {
-        background: #e3f2fd;
-        color: #1976d2;
-        border-color: #bbdefb;
+        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        color: #1565c0;
+        border-color: #2196f3;
       }
       .btnResume:hover {
-        background: #bbdefb;
+        background: #2196f3;
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+      }
+      .btnResume::before {
+        content: "▶";
+        font-size: 0.875rem;
       }
       .btnStop {
-        background: #fee;
-        color: #c33;
-        border-color: #fcc;
+        background: linear-gradient(135deg, #ffe5e5 0%, #ffcccc 100%);
+        color: #c62828;
+        border-color: #ef5350;
+      }
+      .btnStop:hover {
+        background: #ef5350;
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(239, 83, 80, 0.3);
+      }
+      .btnStop::before {
+        content: "⏹";
+        font-size: 1rem;
       }
       .btnExport {
-        background: #e6f4ea;
-        color: #1e8e3e;
-        border-color: #ceead6;
+        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+        color: #2e7d32;
+        border-color: #66bb6a;
+      }
+      .btnExport:hover {
+        background: #66bb6a;
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 187, 106, 0.3);
+      }
+      .btnExport::before {
+        content: "📥";
+        font-size: 1rem;
       }
       .status-badge.paused {
-        background: #fff8e1;
-        color: #f57c00;
+        background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%);
+        color: #e67e00;
+        box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
+      }
+      .status-badge.paused::before {
+        background: #ffc107;
       }
       /* Words section */
       .words-section {
         background: white;
-        border-radius: 8px;
-        padding: 1rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+      }
+      .words-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
       }
       .words-header h3 {
-        margin: 0 0 0.75rem 0;
-        font-size: 0.875rem;
+        margin: 0;
+        font-size: 0.9375rem;
         font-weight: 600;
+        color: #495057;
+      }
+      .words-count-badge {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 0.25rem 0.625rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 700;
       }
       .search-input {
         width: 100%;
-        padding: 0.5rem;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        margin-bottom: 0.75rem;
-        box-sizing: border-box;
+        padding: 0.625rem 0.875rem;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        font-size: 0.8125rem;
+        margin-bottom: 1rem;
+        transition: all 0.2s;
+        background: #f8f9fa;
+      }
+      .search-input:hover {
+        border-color: #dee2e6;
+        background: white;
+      }
+      .search-input:focus {
+        outline: none;
+        border-color: #667eea;
+        background: white;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
+      .search-input::placeholder {
+        color: #adb5bd;
       }
       .words-list {
-        max-height: 200px;
+        max-height: 280px;
         overflow-y: auto;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+      }
+      .words-list::-webkit-scrollbar {
+        width: 8px;
+      }
+      .words-list::-webkit-scrollbar-track {
+        background: #f8f9fa;
+        border-radius: 4px;
+      }
+      .words-list::-webkit-scrollbar-thumb {
+        background: #dee2e6;
+        border-radius: 4px;
+      }
+      .words-list::-webkit-scrollbar-thumb:hover {
+        background: #ced4da;
       }
       .words-list ul {
         list-style: none;
@@ -261,30 +519,66 @@
         margin: 0;
       }
       .words-list li {
-        padding: 0.375rem 0;
+        padding: 0.75rem 1rem;
         border-bottom: 1px solid #f0f0f0;
-        font-size: 0.8125rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #495057;
+        transition: all 0.2s;
+        cursor: pointer;
+      }
+      .words-list li:last-child {
+        border-bottom: none;
+      }
+      .words-list li:hover:not(.empty-state) {
+        background: linear-gradient(90deg, #f8f9fa 0%, white 100%);
+        padding-left: 1.25rem;
       }
       .empty-state {
-        color: #999;
-        font-size: 0.75rem;
+        color: #adb5bd;
+        font-size: 0.8125rem;
         text-align: center;
-        padding: 1rem;
+        padding: 2rem 1rem;
+        cursor: default;
+      }
+      .empty-state:hover {
+        background: none !important;
+        padding-left: 1rem !important;
       }
       /* Footer */
       .footer {
-        padding: 0.75rem 1rem;
-        background: white;
-        border-top: 1px solid #eee;
+        padding: 1rem;
+        background: linear-gradient(180deg, white 0%, #f8f9fa 100%);
+        border-top: 1px solid #e9ecef;
         text-align: center;
       }
       .footer p {
         margin: 0;
-        font-size: 0.625rem;
-        color: #999;
+        font-size: 0.6875rem;
+        color: #6c757d;
+        font-weight: 500;
+      }
+      .footer p::before {
+        content: "⚡ ";
       }
       .hidden {
         display: none !important;
+      }
+      /* Animations */
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .input-section,
+      .status-section,
+      .words-section {
+        animation: fadeIn 0.3s ease;
       }
     </style>
   </head>
@@ -297,30 +591,33 @@
 
       <main class="main">
         <div id="inputSection" class="input-section">
+          <h3 class="section-title">📝 基本配置</h3>
+
           <div class="form-group">
-            <label for="baseKeyword">基准词 (用于标识)</label>
+            <label for="baseKeyword">基准词</label>
             <input
               id="baseKeyword"
               type="text"
               value="gpts"
-              placeholder="例如: AI"
+              placeholder="例如: AI, ChatGPT"
             />
           </div>
 
           <div class="form-group">
-            <label for="seedKeywords">种子关键词 (每行一个或逗号分隔)</label>
+            <label for="seedKeywords">种子关键词</label>
             <textarea
               id="seedKeywords"
-              placeholder="例如: ChatGPT&#10;OpenAI&#10;人工智能"
-              rows="4"
+              placeholder="每行一个关键词，或用逗号分隔&#10;例如: translator, generator, builder"
+              rows="3"
             >translator,generator</textarea>
+            <div class="form-help">💡 这些关键词将作为挖掘的起点，系统会自动发现相关的新兴词汇</div>
           </div>
 
           <div class="form-row">
             <div class="form-group">
               <label for="timeRange">时间范围</label>
               <select id="timeRange">
-                <option value="today 12-m">过去 12 个月</option>
+                <option value="today 12-m" selected>过去 12 个月</option>
                 <option value="today 3-m">过去 3 个月</option>
                 <option value="today 1-m">过去 1 个月</option>
                 <option value="today 5-y">过去 5 年</option>
@@ -329,105 +626,117 @@
             </div>
 
             <div class="form-group">
-              <label for="geo">地区</label>
+              <label for="geo">目标地区</label>
               <select id="geo">
-                <option value="" selected>全球</option>
-                <option value="US">美国</option>
-                <option value="JP">日本</option>
-                <option value="KR">韩国</option>
-                <option value="GB">英国</option>
-                <option value="FR">法国</option>
-                <option value="DE">德国</option>
-                <option value="CN">中国</option>
+                <option value="" selected>🌍 全球</option>
+                <option value="US">🇺🇸 美国</option>
+                <option value="JP">🇯🇵 日本</option>
+                <option value="KR">🇰🇷 韩国</option>
+                <option value="GB">🇬🇧 英国</option>
+                <option value="FR">🇫🇷 法国</option>
+                <option value="DE">🇩🇪 德国</option>
+                <option value="CN">🇨🇳 中国</option>
               </select>
             </div>
           </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label for="threshold">阈值 (相对基准词百分比)</label>
-              <input
-                id="threshold"
-                type="number"
-                min="1"
-                max="100"
-                value="20"
-              />
-              <div class="form-help">候选词最后5个时间点均值 / 基准词最后5个时间点均值 × 100，达到阈值即判定有效。</div>
-            </div>
+          <div class="section-divider"></div>
 
-            <div class="form-group">
-              <label for="maxKeywords">最大关键词数 (0为无限制)</label>
-              <input
-                id="maxKeywords"
-                type="number"
-                min="0"
-                value="100"
-              />
+          <div class="advanced-section">
+            <button type="button" class="advanced-toggle" id="advancedToggle">
+              高级选项
+            </button>
+            <div class="advanced-options" id="advancedOptions">
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="threshold">有效性阈值 (%)</label>
+                  <input
+                    id="threshold"
+                    type="number"
+                    min="1"
+                    max="100"
+                    value="20"
+                  />
+                  <div class="form-help">候选词搜索热度相对于基准词的百分比，达到此阈值即判定为有效新词</div>
+                </div>
+
+                <div class="form-group">
+                  <label for="maxKeywords">最大处理数</label>
+                  <input
+                    id="maxKeywords"
+                    type="number"
+                    min="0"
+                    value="100"
+                    placeholder="0 = 无限制"
+                  />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="relatedQueryLimit">每轮候选词数量</label>
+                <input
+                  id="relatedQueryLimit"
+                  type="number"
+                  min="0"
+                  value="20"
+                  placeholder="0 = 全部"
+                />
+                <div class="form-help">限制每次从相关查询中加入队列的候选词数量，可控制挖掘广度</div>
+              </div>
             </div>
           </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label for="relatedQueryLimit">每次候选词数量 (0为全部)</label>
-              <input
-                id="relatedQueryLimit"
-                type="number"
-                min="0"
-                value="20"
-              />
-              <div class="form-help">功能：限制每次从 related queries 加入关键词池的候选词数量；0 表示不限制（取全部）。</div>
-            </div>
-          </div>
-
-          <button id="startBtn" class="btn-primary">开始挖掘</button>
+          <button id="startBtn" class="btn-primary">🚀 开始挖掘</button>
 
           <div id="resultNotice" class="result-notice hidden">
-            <span class="title">上次任务结束原因</span>
-            <span id="resultNoticeText" class="content">未记录</span>
+            <div>
+              <span class="title">上次任务结束</span>
+              <span id="resultNoticeText" class="content">未记录</span>
+            </div>
           </div>
         </div>
 
         <div id="statusSection" class="status-section hidden">
           <div class="status-header">
-            <h3>挖掘状态</h3>
+            <h3>📊 实时状态</h3>
             <span id="statusBadge" class="status-badge active">运行中</span>
           </div>
 
           <div class="status-grid">
             <div class="status-item">
-              <span class="status-label">当前关键词</span>
+              <span class="status-label">💬 当前关键词</span>
               <span id="currentKeyword" class="status-value">-</span>
             </div>
 
             <div class="status-item">
-              <span class="status-label">已处理</span>
+              <span class="status-label">✅ 已处理</span>
               <span id="processedCount" class="status-value">0</span>
             </div>
 
             <div class="status-item">
-              <span class="status-label">队列大小</span>
+              <span class="status-label">📋 队列大小</span>
               <span id="queueSize" class="status-value">0</span>
             </div>
 
             <div class="status-item">
-              <span class="status-label">有效新词</span>
+              <span class="status-label">⭐ 有效新词</span>
               <span id="effectiveNewWordsCount" class="status-value highlight">0</span>
             </div>
 
             <div class="status-item">
-              <span class="status-label">当前深度</span>
+              <span class="status-label">🔄 挖掘深度</span>
               <span id="currentDepth" class="status-value">0</span>
             </div>
 
-            <div class="status-item" style="grid-column: 1 / -1;">
-              <span class="status-label">状态消息</span>
-              <span id="statusMessage" class="status-value" style="font-size: 0.75rem;">未开始</span>
+            <div class="status-item full-width">
+              <span class="status-label">📝 状态消息</span>
+              <span id="statusMessage" class="status-value">未开始</span>
             </div>
 
-            <div class="status-item" style="grid-column: 1 / -1;">
-              <span class="status-label">本次结束原因</span>
-              <span id="endReason" class="status-value" style="font-size: 0.75rem;">未开始</span>
+            <div class="status-item full-width">
+              <span class="status-label">🏁 结束原因</span>
+              <span id="endReason" class="status-value">未开始</span>
             </div>
           </div>
 
@@ -441,14 +750,15 @@
 
         <div class="words-section">
           <div class="words-header">
-            <h3>有效新词 (<span id="wordsCount">0</span>)</h3>
+            <h3>✨ 有效新词</h3>
+            <span class="words-count-badge" id="wordsCount">0</span>
           </div>
 
           <input
             type="text"
             id="searchInput"
             class="search-input"
-            placeholder="筛选关键词..."
+            placeholder="🔍 搜索关键词..."
           />
 
           <div class="words-list">
