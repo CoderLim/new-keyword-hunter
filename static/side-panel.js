@@ -1,6 +1,7 @@
 // State
 let state = {
   isActive: false,
+  isPaused: false,
   currentKeyword: "",
   processedCount: 0,
   queueSize: 0,
@@ -17,6 +18,8 @@ let effectiveWords = []
 const inputSection = document.getElementById("inputSection")
 const statusSection = document.getElementById("statusSection")
 const startBtn = document.getElementById("startBtn")
+const pauseBtn = document.getElementById("pauseBtn")
+const resumeBtn = document.getElementById("resumeBtn")
 const stopBtn = document.getElementById("stopBtn")
 const exportBtn = document.getElementById("exportBtn")
 const resultNoticeEl = document.getElementById("resultNotice")
@@ -42,6 +45,8 @@ function init() {
 
 function setupEventListeners() {
   startBtn?.addEventListener("click", handleStart)
+  pauseBtn?.addEventListener("click", handlePause)
+  resumeBtn?.addEventListener("click", handleResume)
   stopBtn?.addEventListener("click", handleStop)
   exportBtn?.addEventListener("click", handleExport)
   searchInputEl?.addEventListener("input", renderWordsList)
@@ -125,10 +130,25 @@ function handleStart() {
   updateUI()
 }
 
+function handlePause() {
+  chrome.runtime.sendMessage({ type: "PAUSE_CAPTURE" })
+  state.isPaused = true
+  state.statusMessage = "已暂停"
+  updateUI()
+}
+
+function handleResume() {
+  chrome.runtime.sendMessage({ type: "RESUME_CAPTURE" })
+  state.isPaused = false
+  state.statusMessage = "恢复处理中..."
+  updateUI()
+}
+
 function handleStop() {
   const wasActive = state.isActive
   chrome.runtime.sendMessage({ type: "STOP_CAPTURE" })
   state.isActive = false
+  state.isPaused = false
   state.statusMessage = "已停止"
   state.endReason = "手动停止"
   showResultNotice = wasActive
@@ -218,13 +238,27 @@ function updateState(newState) {
 }
 
 function updateUI() {
-  if (state.isActive) {
+  const isRunning = state.isActive && !state.isPaused
+  const isPaused = state.isActive && state.isPaused
+  const isIdle = !state.isActive
+
+  // Section visibility
+  if (isRunning || isPaused) {
     inputSection?.classList.add("hidden")
     statusSection?.classList.remove("hidden")
     resultNoticeEl?.classList.add("hidden")
+    stopBtn?.classList.remove("hidden")
+    exportBtn?.classList.remove("hidden")
+
+    // Only difference between ACTIVE and PAUSED states
+    pauseBtn?.classList.toggle("hidden", isPaused)
+    resumeBtn?.classList.toggle("hidden", isRunning)
   } else {
+    // IDLE state
     inputSection?.classList.remove("hidden")
     statusSection?.classList.add("hidden")
+    pauseBtn?.classList.add("hidden")
+    resumeBtn?.classList.add("hidden")
 
     const reason = state.endReason || state.lastError || ""
     if (showResultNotice && reason) {
@@ -235,6 +269,20 @@ function updateUI() {
     }
   }
 
+  // Update status badge
+  statusBadgeEl.classList.remove("active", "inactive", "paused")
+  if (isRunning) {
+    statusBadgeEl.textContent = "运行中"
+    statusBadgeEl.classList.add("active")
+  } else if (isPaused) {
+    statusBadgeEl.textContent = "已暂停"
+    statusBadgeEl.classList.add("paused")
+  } else {
+    statusBadgeEl.textContent = "已停止"
+    statusBadgeEl.classList.add("inactive")
+  }
+
+  // Update status values
   currentKeywordEl.textContent = state.currentKeyword || "-"
   processedCountEl.textContent = state.processedCount
   queueSizeEl.textContent = state.queueSize
@@ -250,16 +298,6 @@ function updateUI() {
     endReasonEl.textContent = "未开始"
   } else {
     endReasonEl.textContent = "未记录"
-  }
-
-  if (state.isActive) {
-    statusBadgeEl.textContent = "运行中"
-    statusBadgeEl.classList.remove("inactive")
-    statusBadgeEl.classList.add("active")
-  } else {
-    statusBadgeEl.textContent = "已停止"
-    statusBadgeEl.classList.remove("active")
-    statusBadgeEl.classList.add("inactive")
   }
 
   wordsCountEl.textContent = state.effectiveNewWordsCount

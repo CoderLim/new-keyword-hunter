@@ -193,6 +193,7 @@ export class KeywordStorage {
     if (!data) {
       return {
         isActive: false,
+        isPaused: false,
         currentKeyword: "",
         processedCount: 0,
         queueSize: 0,
@@ -203,11 +204,16 @@ export class KeywordStorage {
       }
     }
     try {
-      return JSON.parse(data)
+      const parsed = JSON.parse(data)
+      return {
+        isPaused: false,
+        ...parsed
+      }
     } catch (error) {
       console.error("解析捕获状态失败:", error)
       return {
         isActive: false,
+        isPaused: false,
         currentKeyword: "",
         processedCount: 0,
         queueSize: 0,

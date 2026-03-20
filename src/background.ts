@@ -22,6 +22,7 @@ const MAX_EMPTY_QUEUE_RETRY = 4
 let captureStartedAt = 0
 let hasFinalizedCurrentRun = false
 let isFinalizingCapture = false
+let cachedIsPaused = false
 
 function isDuplicateIntercept(url: string, responseBody: string): boolean {
   const now = Date.now()
@@ -211,6 +212,13 @@ async function processNextKeyword(): Promise<boolean> {
       return false
     }
 
+    // Check if paused (sync cache with persisted state)
+    if (state.isPaused) {
+      cachedIsPaused = true
+      console.log("[NKH] 处理已暂停，跳过")
+      return false
+    }
+
     // 检查是否达到最大关键词数
     if (options.maxKeywords > 0 && state.processedCount >= options.maxKeywords) {
       await finalizeCapture("normal", "达到最大关键词数限制")
@@ -335,6 +343,7 @@ async function startCapture(options: CaptureOptions) {
   timelineKeywordProcessedAt.clear()
   hasFinalizedCurrentRun = false
   captureStartedAt = Date.now()
+  cachedIsPaused = false
 
   // 初始化
   await KeywordStorage.clearAll()
@@ -349,6 +358,7 @@ async function startCapture(options: CaptureOptions) {
 
   const state: CaptureState = {
     isActive: true,
+    isPaused: false,
     currentKeyword: "",
     processedCount: 0,
     queueSize: actualQueueSize,
@@ -373,6 +383,60 @@ async function stopCapture() {
 }
 
 /**
+ * 暂停捕获 - 暂停处理但保留队列和状态
+ */
+async function pauseCapture() {
+  const state = await KeywordStorage.getCaptureState()
+
+  if (!state.isActive || state.isPaused) {
+    return
+  }
+
+  const pausedState: CaptureState = {
+    ...state,
+    isPaused: true,
+    statusMessage: "已暂停"
+  }
+
+  cachedIsPaused = true
+  await KeywordStorage.setCaptureState(pausedState)
+  await sendStatusUpdate(pausedState)
+
+  console.log("[NKH] 捕获已暂停", {
+    processedCount: state.processedCount,
+    queueSize: state.queueSize
+  })
+}
+
+/**
+ * 恢复捕获 - 从暂停状态继续
+ */
+async function resumeCapture() {
+  const state = await KeywordStorage.getCaptureState()
+
+  if (!state.isActive || !state.isPaused) {
+    return
+  }
+
+  const resumedState: CaptureState = {
+    ...state,
+    isPaused: false,
+    statusMessage: "恢复处理中..."
+  }
+
+  cachedIsPaused = false
+  await KeywordStorage.setCaptureState(resumedState)
+  await sendStatusUpdate(resumedState)
+
+  console.log("[NKH] 捕获已恢复", {
+    processedCount: state.processedCount,
+    queueSize: state.queueSize
+  })
+
+  setTimeout(() => processNextKeyword(), 500)
+}
+
+/**
  * 处理从 content script 接收的数据
  */
 async function handleInterceptedData(url: string, responseBody: string) {
@@ -381,6 +445,23 @@ async function handleInterceptedData(url: string, responseBody: string) {
 
   if (!state.isActive || !options) {
     return
+  }
+
+  // Process intercepts for current keyword even when paused to avoid dropping in-flight responses
+  // Only block new keyword processing in processNextKeyword()
+  if (state.isPaused) {
+    // Sync cache with persisted state (handles service worker restart)
+    cachedIsPaused = state.isPaused
+
+    const keyword = extractKeywordFromUrl(url) || state.currentKeyword?.trim()
+
+    // Only process if this is for the current in-flight keyword
+    if (keyword !== state.currentKeyword) {
+      console.log("[NKH] 暂停中，忽略非当前关键词的拦截数据", { keyword, currentKeyword: state.currentKeyword })
+      return
+    }
+
+    console.log("[NKH] 暂停中，但处理当前关键词的响应", { keyword })
   }
 
   if (isDuplicateIntercept(url, responseBody)) {
@@ -529,8 +610,15 @@ chrome.webRequest.onCompleted.addListener(
         return
       }
 
+      // Fast path: check cached pause flag first
+      if (cachedIsPaused) {
+        return
+      }
+
       const state = await KeywordStorage.getCaptureState()
-      if (!state.isActive) {
+      if (!state.isActive || state.isPaused) {
+        // Sync cache with persisted state (handles service worker restart)
+        cachedIsPaused = state.isPaused
         return
       }
 
@@ -576,8 +664,15 @@ chrome.webRequest.onCompleted.addListener(
         return
       }
 
+      // Fast path: check cached pause flag first
+      if (cachedIsPaused) {
+        return
+      }
+
       const state = await KeywordStorage.getCaptureState()
-      if (!state.isActive) {
+      if (!state.isActive || state.isPaused) {
+        // Sync cache with persisted state (handles service worker restart)
+        cachedIsPaused = state.isPaused
         return
       }
 
@@ -621,6 +716,16 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
     case "STOP_CAPTURE":
       stopCapture()
+      sendResponse({ success: true })
+      break
+
+    case "PAUSE_CAPTURE":
+      pauseCapture()
+      sendResponse({ success: true })
+      break
+
+    case "RESUME_CAPTURE":
+      resumeCapture()
       sendResponse({ success: true })
       break
 

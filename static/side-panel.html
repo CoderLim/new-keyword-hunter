@@ -187,6 +187,8 @@
         display: flex;
         gap: 0.75rem;
       }
+      .btnPause,
+      .btnResume,
       .btnStop,
       .btnExport {
         flex: 1;
@@ -196,6 +198,23 @@
         font-size: 0.875rem;
         font-weight: 500;
         cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btnPause {
+        background: #fff8e1;
+        color: #f57c00;
+        border-color: #ffe0b2;
+      }
+      .btnPause:hover {
+        background: #ffecb3;
+      }
+      .btnResume {
+        background: #e3f2fd;
+        color: #1976d2;
+        border-color: #bbdefb;
+      }
+      .btnResume:hover {
+        background: #bbdefb;
       }
       .btnStop {
         background: #fee;
@@ -206,6 +225,10 @@
         background: #e6f4ea;
         color: #1e8e3e;
         border-color: #ceead6;
+      }
+      .status-badge.paused {
+        background: #fff8e1;
+        color: #f57c00;
       }
       /* Words section */
       .words-section {
@@ -409,6 +432,8 @@
           </div>
 
           <div class="actions">
+            <button id="pauseBtn" class="btnPause hidden">暂停</button>
+            <button id="resumeBtn" class="btnResume hidden">继续</button>
             <button id="stopBtn" class="btnStop">停止挖掘</button>
             <button id="exportBtn" class="btnExport">导出数据</button>
           </div>

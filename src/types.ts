@@ -57,6 +57,7 @@ export type CaptureEndType = "normal" | "abnormal"
  */
 export interface CaptureState {
   isActive: boolean
+  isPaused: boolean
   currentKeyword: string
   processedCount: number
   queueSize: number
@@ -118,6 +119,8 @@ export interface HistoryRecord {
 export type MessageType =
   | "START_CAPTURE"
   | "STOP_CAPTURE"
+  | "PAUSE_CAPTURE"
+  | "RESUME_CAPTURE"
   | "CAPTURE_STATUS"
   | "NEW_KEYWORDS"
   | "EFFECTIVE_WORD_FOUND"
