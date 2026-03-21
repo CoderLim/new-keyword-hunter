@@ -10,9 +10,12 @@ import {
   parseTimelineResponse,
   parseTimelineSeriesValues,
   isNewWordEffective,
-  isNewWordEffectiveByBase
+  isNewWordEffectiveByBase,
+  batchAnalyzeNewWords
 } from "~lib/keyword-analyzer"
 import type { CaptureState, CaptureOptions, Message, CaptureEndType } from "~types"
+import { TokenBucket, AdaptiveRateLimiter, CircuitBreaker } from "~lib/rate-limiter"
+import { RATE_LIMIT_CONFIG } from "~config"
 
 const recentInterceptSignatures = new Map<string, number>()
 const timelineKeywordProcessedAt = new Map<string, number>()
@@ -23,6 +26,14 @@ let captureStartedAt = 0
 let hasFinalizedCurrentRun = false
 let isFinalizingCapture = false
 let cachedIsPaused = false
+
+// Rate limiting components
+const tokenBucket = new TokenBucket()
+const adaptiveRateLimiter = new AdaptiveRateLimiter()
+const circuitBreaker = new CircuitBreaker()
+
+// Track current processing batch
+let processingBatch: string[] = []
 
 function isDuplicateIntercept(url: string, responseBody: string): boolean {
   const now = Date.now()
@@ -195,7 +206,7 @@ async function finalizeCapture(endType: CaptureEndType, endReason: string) {
 }
 
 /**
- * 处理下一个关键词
+ * 处理下一批关键词（批量对比优化）
  */
 async function processNextKeyword(): Promise<boolean> {
   if (isProcessingNextKeyword) {
@@ -225,14 +236,23 @@ async function processNextKeyword(): Promise<boolean> {
       return false
     }
 
-    const nextKeyword = await KeywordStorage.getNextKeyword()
-    console.log("[NKH] processNextKeyword", {
-      nextKeyword,
+    // 计算实际批量大小（尊重 maxKeywords 限制）
+    let actualBatchSize = RATE_LIMIT_CONFIG.batchSize
+    if (options.maxKeywords > 0) {
+      const remaining = options.maxKeywords - state.processedCount
+      actualBatchSize = Math.min(actualBatchSize, remaining)
+    }
+
+    // 批量出队（一次取 actualBatchSize 个候选词）
+    const candidateBatch = await KeywordStorage.getNextBatch(actualBatchSize)
+
+    console.log("[NKH] processNextKeyword (batch)", {
+      batchSize: candidateBatch.length,
       processedCount: state.processedCount,
       queueSize: state.queueSize
     })
 
-    if (!nextKeyword) {
+    if (candidateBatch.length === 0) {
       // 队列为空，等待其他请求填充
       const queueSize = await syncQueueSize()
 
@@ -266,30 +286,59 @@ async function processNextKeyword(): Promise<boolean> {
 
     emptyQueueRetryCount = 0
 
-    // 标记为已处理
-    await KeywordStorage.addProcessedKeyword(nextKeyword)
+    // 批量标记为已处理
+    await KeywordStorage.addProcessedKeywords(candidateBatch)
 
     // 同步队列大小
     const queueSize = await syncQueueSize()
 
+    // 构建 URL（基准词 + 批量候选词）
+    const resolvedGeo = options.geo === undefined ? "CN" : options.geo
+    const baseKeyword = options.baseKeyword.trim()
+
+    // 过滤掉与基准词重复的候选词（避免 q=base,base,... 的情况）
+    const filteredBatch = baseKeyword
+      ? candidateBatch.filter((kw) => kw !== baseKeyword)
+      : candidateBatch
+
+    // 如果过滤掉了基准词，记录警告
+    if (filteredBatch.length < candidateBatch.length) {
+      console.warn("[NKH] 基准词在候选队列中被过滤", {
+        baseKeyword,
+        originalBatchSize: candidateBatch.length,
+        filteredBatchSize: filteredBatch.length
+      })
+    }
+
+    // 保存当前处理批次（使用过滤后的批次）
+    processingBatch = filteredBatch
+
+    // 如果过滤后批次为空，直接处理下一批
+    if (filteredBatch.length === 0) {
+      console.warn("[NKH] 过滤后批次为空，跳过此批次")
+      setTimeout(() => processNextKeyword(), 500)
+      return false
+    }
+
     // 更新状态
+    const batchDisplay = filteredBatch.join(", ")
     const newState: CaptureState = {
       ...state,
-      currentKeyword: nextKeyword,
-      processedCount: state.processedCount + 1,
+      currentKeyword: batchDisplay,
+      processedCount: state.processedCount + candidateBatch.length,
       queueSize,
-      statusMessage: `正在处理: ${nextKeyword}`
+      statusMessage: `正在处理批次 (${filteredBatch.length} 个候选词)`
     }
     await KeywordStorage.setCaptureState(newState)
     await sendStatusUpdate(newState)
 
-    // 打开 Trends 页面
-    const resolvedGeo = options.geo === undefined ? "CN" : options.geo
-    const baseKeyword = options.baseKeyword.trim()
-    const queryKeywords =
-      baseKeyword && baseKeyword !== nextKeyword
-        ? [baseKeyword, nextKeyword]
-        : [nextKeyword]
+    // 应用令牌桶限流
+    await tokenBucket.acquire()
+
+    const queryKeywords = baseKeyword
+      ? [baseKeyword, ...filteredBatch]
+      : filteredBatch
+
     const encodedQueryKeywords = queryKeywords
       .map((keyword) => encodeURIComponent(keyword))
       .join(",")
@@ -344,6 +393,11 @@ async function startCapture(options: CaptureOptions) {
   hasFinalizedCurrentRun = false
   captureStartedAt = Date.now()
   cachedIsPaused = false
+  processingBatch = []
+
+  // 重置限流器
+  circuitBreaker.reset()
+  adaptiveRateLimiter.setInterval(RATE_LIMIT_CONFIG.adaptive.initialInterval)
 
   // 初始化
   await KeywordStorage.clearAll()
@@ -526,72 +580,97 @@ async function handleInterceptedData(url: string, responseBody: string) {
     }
   }
 
-  // 处理时间线数据
+  // 处理时间线数据（批量分析）
   if (isTimelineRequest(url)) {
-    const processingKeyword = state.currentKeyword?.trim() || keyword
+    const currentBatch = processingBatch
 
-    if (!processingKeyword) {
+    if (currentBatch.length === 0) {
       return
     }
 
+    // 防止重复处理（使用批次的第一个关键词作为标识）
+    const batchKey = currentBatch.join("|")
     const now = Date.now()
-    const lastProcessedAt = timelineKeywordProcessedAt.get(processingKeyword) || 0
+    const lastProcessedAt = timelineKeywordProcessedAt.get(batchKey) || 0
 
     if (now - lastProcessedAt < 3000) {
       return
     }
 
-    timelineKeywordProcessedAt.set(processingKeyword, now)
+    timelineKeywordProcessedAt.set(batchKey, now)
 
     const baseKeyword = options.baseKeyword.trim()
     const timelineSeries = parseTimelineSeriesValues(responseBody)
 
-    let timelinePoints = 0
-    let isEffective = false
-
-    if (baseKeyword && processingKeyword !== baseKeyword && timelineSeries.length >= 2) {
-      const baseTimeline = timelineSeries[0]
-      const candidateTimeline = timelineSeries[1]
-      timelinePoints = candidateTimeline.length
-      isEffective = isNewWordEffectiveByBase(
-        candidateTimeline,
-        baseTimeline,
-        options.threshold
-      )
-    } else {
-      const timeline = parseTimelineResponse(responseBody, options.timeRange)
-      timelinePoints = timeline.length
-      isEffective = isNewWordEffective(timeline, options.threshold, options.timeRange)
-    }
-
-    if (timelinePoints === 0) {
-      // 处理下一个关键词
+    if (timelineSeries.length === 0) {
+      // 处理下一批
+      adaptiveRateLimiter.onSuccess()
       setTimeout(() => processNextKeyword(), 2000)
       return
     }
 
-    console.log("[NKH] 时间线分析完成", {
-      keyword: processingKeyword,
-      timelinePoints,
-      isEffective
-    })
+    // 批量分析
+    if (baseKeyword && timelineSeries.length >= 2) {
+      const results = batchAnalyzeNewWords(timelineSeries, currentBatch, options.threshold)
 
-    if (isEffective) {
-      await KeywordStorage.addEffectiveNewWord(processingKeyword)
-
-      // 发送消息到 side-panel
-      chrome.runtime.sendMessage({
-        type: "EFFECTIVE_WORD_FOUND",
-        payload: { keyword: processingKeyword }
+      console.log("[NKH] 批量分析结果", {
+        batchSize: currentBatch.length,
+        results: results.map((r) => ({ keyword: r.keyword, isEffective: r.isEffective, score: r.score }))
       })
 
-      const effective = await KeywordStorage.getEffectiveNewWords()
-      await sendStatusUpdate({
-        effectiveNewWordsCount: effective.size
-      })
+      const effectiveKeywords = results
+        .filter((r) => r.isEffective)
+        .map((r) => r.keyword)
+
+      // 批量添加有效词
+      if (effectiveKeywords.length > 0) {
+        await KeywordStorage.addEffectiveNewWords(effectiveKeywords)
+
+        // 批量发送消息
+        for (const keyword of effectiveKeywords) {
+          chrome.runtime.sendMessage({
+            type: "EFFECTIVE_WORD_FOUND",
+            payload: { keyword }
+          })
+        }
+
+        const effective = await KeywordStorage.getEffectiveNewWords()
+        await sendStatusUpdate({
+          effectiveNewWordsCount: effective.size
+        })
+      }
+    } else {
+      // 无基准词的情况，逐个分析
+      for (let i = 0; i < currentBatch.length && i < timelineSeries.length; i++) {
+        const keyword = currentBatch[i]
+        const timeline = parseTimelineResponse(responseBody, options.timeRange)
+        const isEffective = isNewWordEffective(timeline, options.threshold, options.timeRange)
+
+        console.log("[NKH] 单词分析结果", {
+          keyword,
+          isEffective
+        })
+
+        if (isEffective) {
+          await KeywordStorage.addEffectiveNewWord(keyword)
+
+          chrome.runtime.sendMessage({
+            type: "EFFECTIVE_WORD_FOUND",
+            payload: { keyword }
+          })
+
+          const effective = await KeywordStorage.getEffectiveNewWords()
+          await sendStatusUpdate({
+            effectiveNewWordsCount: effective.size
+          })
+        }
+      }
     }
 
-    // 处理下一个关键词
+    // 请求成功，通知自适应限流器
+    adaptiveRateLimiter.onSuccess()
+
+    // 处理下一批
     setTimeout(() => processNextKeyword(), 2000)
   }
 }
@@ -680,6 +759,9 @@ chrome.webRequest.onCompleted.addListener(
         url: details.url,
         statusCode: details.statusCode
       })
+
+      // 通知自适应限流器降速
+      adaptiveRateLimiter.on429()
 
       let endReason = "触发 Google Trends 限频（/api/explore 返回 429）"
       try {

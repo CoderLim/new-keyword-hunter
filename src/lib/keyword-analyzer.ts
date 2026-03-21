@@ -230,6 +230,65 @@ export function isNewWordEffectiveByBase(
 }
 
 /**
+ * 批量分析接口
+ */
+export interface BatchAnalysisResult {
+  keyword: string
+  isEffective: boolean
+  score: number
+  baseAvg: number
+  candidateAvg: number
+}
+
+/**
+ * 批量判断多个候选词是否有效
+ * @param seriesValues 多系列时间线数据 [基准词, 候选词1, 候选词2, ...]
+ * @param candidateKeywords 候选关键词列表
+ * @param threshold 阈值
+ * @returns 批量分析结果
+ */
+export function batchAnalyzeNewWords(
+  seriesValues: number[][],
+  candidateKeywords: string[],
+  threshold: number
+): BatchAnalysisResult[] {
+  if (seriesValues.length < 2) {
+    return []
+  }
+
+  const baseTimeline = seriesValues[0]
+  const results: BatchAnalysisResult[] = []
+
+  // 从 index 1 开始遍历候选词系列
+  for (let i = 1; i < seriesValues.length && i - 1 < candidateKeywords.length; i++) {
+    const candidateKeyword = candidateKeywords[i - 1]
+    const candidateTimeline = seriesValues[i]
+
+    const isEffective = isNewWordEffectiveByBase(candidateTimeline, baseTimeline, threshold)
+
+    // 计算评分
+    const candidateLastFive = candidateTimeline.slice(-5)
+    const baseLastFive = baseTimeline.slice(-5)
+
+    const candidateAvg =
+      candidateLastFive.reduce((sum, value) => sum + value, 0) / candidateLastFive.length
+    const baseAvg = baseLastFive.reduce((sum, value) => sum + value, 0) / baseLastFive.length
+
+    const score = baseAvg > 0 ? (candidateAvg / baseAvg) * 100 : 0
+
+    results.push({
+      keyword: candidateKeyword,
+      isEffective,
+      score,
+      baseAvg,
+      candidateAvg,
+    })
+  }
+
+  return results
+}
+
+/**
  * 分析关键词是否为新词
  */
 export function analyzeKeyword(

@@ -53,6 +53,19 @@ export class KeywordStorage {
   }
 
   /**
+   * 批量添加有效新词
+   */
+  static async addEffectiveNewWords(keywords: string[]): Promise<void> {
+    const words = await this.getEffectiveNewWords()
+
+    for (const keyword of keywords) {
+      words.add(keyword)
+    }
+
+    await this.setEffectiveNewWords(words)
+  }
+
+  /**
    * 获取已处理关键词
    */
   static async getProcessedKeywords(): Promise<Set<string>> {
@@ -86,6 +99,19 @@ export class KeywordStorage {
     words.add(word)
     await this.setProcessedKeywords(words)
     return true
+  }
+
+  /**
+   * 批量添加已处理关键词
+   */
+  static async addProcessedKeywords(keywords: string[]): Promise<void> {
+    const words = await this.getProcessedKeywords()
+
+    for (const keyword of keywords) {
+      words.add(keyword)
+    }
+
+    await this.setProcessedKeywords(words)
   }
 
   /**
@@ -138,6 +164,24 @@ export class KeywordStorage {
     const newQueue = queue.slice(1)
     await this.setKeywordsQueue(newQueue)
     return next
+  }
+
+  /**
+   * 批量从队列取出关键词
+   * @param batchSize 批量大小
+   * @returns 出队的关键词数组（可能少于 batchSize）
+   */
+  static async getNextBatch(batchSize: number): Promise<string[]> {
+    const queue = await this.getKeywordsQueue()
+    if (queue.length === 0) {
+      return []
+    }
+
+    const batch = queue.slice(0, batchSize)
+    const newQueue = queue.slice(batchSize)
+    await this.setKeywordsQueue(newQueue)
+
+    return batch
   }
 
   /**

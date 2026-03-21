@@ -50,6 +50,17 @@ export interface AnalysisResult {
   avgValue?: number
 }
 
+/**
+ * 批量分析结果
+ */
+export interface BatchAnalysisResult {
+  keyword: string
+  isEffective: boolean
+  score: number
+  baseAvg: number
+  candidateAvg: number
+}
+
 export type CaptureEndType = "normal" | "abnormal"
 
 /**
