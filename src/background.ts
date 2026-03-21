@@ -13,7 +13,7 @@ import {
   isNewWordEffectiveByBase,
   batchAnalyzeNewWords
 } from "~lib/keyword-analyzer"
-import type { CaptureState, CaptureOptions, Message, CaptureEndType } from "~types"
+import type { CaptureState, CaptureOptions, Message, CaptureEndType, QueueItem, PauseReason } from "~types"
 import { TokenBucket, AdaptiveRateLimiter, CircuitBreaker } from "~lib/rate-limiter"
 import { RATE_LIMIT_CONFIG } from "~config"
 
@@ -33,7 +33,10 @@ const adaptiveRateLimiter = new AdaptiveRateLimiter()
 const circuitBreaker = new CircuitBreaker()
 
 // Track current processing batch
-let processingBatch: string[] = []
+let processingBatch: QueueItem[] = []
+
+// Auto-resume timer
+let autoResumeTimerId: NodeJS.Timeout | null = null
 
 function isDuplicateIntercept(url: string, responseBody: string): boolean {
   const now = Date.now()
@@ -206,6 +209,61 @@ async function finalizeCapture(endType: CaptureEndType, endReason: string) {
 }
 
 /**
+ * 取消定时恢复
+ */
+function cancelScheduledResume() {
+  if (autoResumeTimerId) {
+    clearTimeout(autoResumeTimerId)
+    autoResumeTimerId = null
+    console.log("[NKH] 取消定时恢复")
+  }
+}
+
+/**
+ * 检查当前组是否完成
+ */
+function checkGroupCompletion(state: CaptureState, options: CaptureOptions): boolean {
+  if (!options || options.requestsPerGroup <= 0) {
+    return false  // 无组限制
+  }
+
+  return state.currentGroupProgress >= options.requestsPerGroup
+}
+
+/**
+ * 组完成后暂停并安排自动恢复
+ */
+async function pauseForGroupRest(state: CaptureState, options: CaptureOptions) {
+  const restMs = options.groupRestMinutes * 60 * 1000
+  const resumeTime = Date.now() + restMs
+
+  const pausedState: CaptureState = {
+    ...state,
+    isPaused: true,
+    pauseReason: "group_complete",
+    scheduledResumeTime: resumeTime,
+    statusMessage: `第${Math.ceil(state.currentGroupProgress / options.requestsPerGroup)}组已完成，休息${options.groupRestMinutes}分钟后自动继续`,
+    currentGroupProgress: 0  // 重置为下一组准备
+  }
+
+  cachedIsPaused = true
+  await KeywordStorage.setCaptureState(pausedState)
+  await sendStatusUpdate(pausedState)
+
+  console.log("[NKH] 组完成自动暂停", {
+    processedCount: state.processedCount,
+    restMinutes: options.groupRestMinutes,
+    resumeTime: new Date(resumeTime).toLocaleString()
+  })
+
+  // 安排自动恢复
+  autoResumeTimerId = setTimeout(() => {
+    console.log("[NKH] 组间休息完成，自动恢复")
+    void resumeCapture()
+  }, restMs)
+}
+
+/**
  * 处理下一批关键词（批量对比优化）
  */
 async function processNextKeyword(): Promise<boolean> {
@@ -230,41 +288,38 @@ async function processNextKeyword(): Promise<boolean> {
       return false
     }
 
-    // 检查是否达到最大关键词数
-    if (options.maxKeywords > 0 && state.processedCount >= options.maxKeywords) {
-      await finalizeCapture("normal", "达到最大关键词数限制")
+    // 检查当前组是否完成
+    if (checkGroupCompletion(state, options)) {
+      await pauseForGroupRest(state, options)
       return false
     }
 
-    // 计算实际批量大小（尊重 maxKeywords 限制）
-    let actualBatchSize = RATE_LIMIT_CONFIG.batchSize
-    if (options.maxKeywords > 0) {
-      const remaining = options.maxKeywords - state.processedCount
-      actualBatchSize = Math.min(actualBatchSize, remaining)
-    }
-
-    // 批量出队（一次取 actualBatchSize 个候选词）
+    // 批量出队（使用标准批量大小，不再考虑组内剩余容量）
+    const actualBatchSize = RATE_LIMIT_CONFIG.batchSize
     const candidateBatch = await KeywordStorage.getNextBatch(actualBatchSize)
 
     console.log("[NKH] processNextKeyword (batch)", {
       batchSize: candidateBatch.length,
       processedCount: state.processedCount,
-      queueSize: state.queueSize
+      queueSize: state.queueSize,
+      groupProgress: state.currentGroupProgress
     })
 
     if (candidateBatch.length === 0) {
-      // 队列为空，等待其他请求填充
+      // 队列为空，检查是否因达到深度限制
       const queueSize = await syncQueueSize()
 
-      if (queueSize > 0) {
-        setTimeout(() => processNextKeyword(), 1500)
+      if (queueSize === 0) {
+        // 队列真正为空 - 可能是达到深度限制
+        await pauseCapture("max_depth", "已达到最大挖掘深度，队列为空")
         return false
       }
 
+      // 队列可能被飞行中的请求重新填充
       emptyQueueRetryCount += 1
 
       if (emptyQueueRetryCount >= MAX_EMPTY_QUEUE_RETRY) {
-        await finalizeCapture("normal", "关键词队列处理完成")
+        await pauseCapture("max_depth", "队列处理完成")
         return false
       }
 
@@ -286,8 +341,11 @@ async function processNextKeyword(): Promise<boolean> {
 
     emptyQueueRetryCount = 0
 
+    // 提取关键词字符串
+    const keywords = candidateBatch.map(item => item.keyword)
+
     // 批量标记为已处理
-    await KeywordStorage.addProcessedKeywords(candidateBatch)
+    await KeywordStorage.addProcessedKeywords(keywords)
 
     // 同步队列大小
     const queueSize = await syncQueueSize()
@@ -298,7 +356,7 @@ async function processNextKeyword(): Promise<boolean> {
 
     // 过滤掉与基准词重复的候选词（避免 q=base,base,... 的情况）
     const filteredBatch = baseKeyword
-      ? candidateBatch.filter((kw) => kw !== baseKeyword)
+      ? candidateBatch.filter((item) => item.keyword !== baseKeyword)
       : candidateBatch
 
     // 如果过滤掉了基准词，记录警告
@@ -320,14 +378,17 @@ async function processNextKeyword(): Promise<boolean> {
       return false
     }
 
-    // 更新状态
-    const batchDisplay = filteredBatch.join(", ")
+    // 更新状态（包含组进度）- 每次请求计数+1
+    const batchDisplay = filteredBatch.map(item => item.keyword).join(", ")
+    const newGroupProgress = state.currentGroupProgress + 1
+
     const newState: CaptureState = {
       ...state,
       currentKeyword: batchDisplay,
       processedCount: state.processedCount + candidateBatch.length,
       queueSize,
-      statusMessage: `正在处理批次 (${filteredBatch.length} 个候选词)`
+      currentGroupProgress: newGroupProgress,
+      statusMessage: `正在处理批次 (${filteredBatch.length} 个候选词) - 组进度: ${newGroupProgress}/${options.requestsPerGroup} 次查询`
     }
     await KeywordStorage.setCaptureState(newState)
     await sendStatusUpdate(newState)
@@ -335,9 +396,10 @@ async function processNextKeyword(): Promise<boolean> {
     // 应用令牌桶限流
     await tokenBucket.acquire()
 
+    const filteredKeywords = filteredBatch.map(item => item.keyword)
     const queryKeywords = baseKeyword
-      ? [baseKeyword, ...filteredBatch]
-      : filteredBatch
+      ? [baseKeyword, ...filteredKeywords]
+      : filteredKeywords
 
     const encodedQueryKeywords = queryKeywords
       .map((keyword) => encodeURIComponent(keyword))
@@ -394,6 +456,7 @@ async function startCapture(options: CaptureOptions) {
   captureStartedAt = Date.now()
   cachedIsPaused = false
   processingBatch = []
+  cancelScheduledResume()  // 清除任何现有定时器
 
   // 重置限流器
   circuitBreaker.reset()
@@ -403,9 +466,10 @@ async function startCapture(options: CaptureOptions) {
   await KeywordStorage.clearAll()
   await KeywordStorage.setCaptureOptions(options)
 
-  // 添加种子关键词到队列
+  // 添加种子关键词到队列（深度为0）
   const filtered = filterLowValueKeywords(options.seedKeywords)
-  await KeywordStorage.addToQueue(filtered)
+  const seedItems = filtered.map(keyword => ({ keyword, depth: 0 }))
+  await KeywordStorage.addToQueue(seedItems)
 
   // 获取实际队列大小（因为 addToQueue 会去重和过滤）
   const actualQueueSize = (await KeywordStorage.getKeywordsQueue()).length
@@ -417,10 +481,10 @@ async function startCapture(options: CaptureOptions) {
     processedCount: 0,
     queueSize: actualQueueSize,
     effectiveNewWordsCount: 0,
-    currentDepth: 0,
+    currentGroupProgress: 0,
+    currentGroupTarget: options.requestsPerGroup,
     endReason: "",
-    statusMessage: "准备开始...",
-    maxKeywords: options.maxKeywords
+    statusMessage: "准备开始..."
   }
 
   await KeywordStorage.setCaptureState(state)
@@ -439,17 +503,22 @@ async function stopCapture() {
 /**
  * 暂停捕获 - 暂停处理但保留队列和状态
  */
-async function pauseCapture() {
+async function pauseCapture(reason: PauseReason = "manual", message?: string) {
   const state = await KeywordStorage.getCaptureState()
 
   if (!state.isActive || state.isPaused) {
     return
   }
 
+  // 取消任何定时恢复
+  cancelScheduledResume()
+
   const pausedState: CaptureState = {
     ...state,
     isPaused: true,
-    statusMessage: "已暂停"
+    pauseReason: reason,
+    scheduledResumeTime: undefined,
+    statusMessage: message || "已暂停"
   }
 
   cachedIsPaused = true
@@ -457,6 +526,7 @@ async function pauseCapture() {
   await sendStatusUpdate(pausedState)
 
   console.log("[NKH] 捕获已暂停", {
+    reason,
     processedCount: state.processedCount,
     queueSize: state.queueSize
   })
@@ -472,9 +542,14 @@ async function resumeCapture() {
     return
   }
 
+  // 取消任何定时恢复（手动恢复覆盖）
+  cancelScheduledResume()
+
   const resumedState: CaptureState = {
     ...state,
     isPaused: false,
+    pauseReason: undefined,
+    scheduledResumeTime: undefined,
     statusMessage: "恢复处理中..."
   }
 
@@ -484,7 +559,8 @@ async function resumeCapture() {
 
   console.log("[NKH] 捕获已恢复", {
     processedCount: state.processedCount,
-    queueSize: state.queueSize
+    queueSize: state.queueSize,
+    groupProgress: state.currentGroupProgress
   })
 
   setTimeout(() => processNextKeyword(), 500)
@@ -558,10 +634,34 @@ async function handleInterceptedData(url: string, responseBody: string) {
       relatedQueryLimit > 0 ? others.slice(0, relatedQueryLimit) : others
 
     if (selectedCandidates.length > 0) {
-      await KeywordStorage.addToQueue(selectedCandidates)
+      // 查找父关键词的深度
+      const parentItem = processingBatch.find(item => item.keyword === keyword)
+      const parentDepth = parentItem ? parentItem.depth : 0
+      const childDepth = parentDepth + 1
+
+      // 检查是否应该添加子关键词（深度限制）
+      if (childDepth >= options.maxDepth) {
+        console.log("[NKH] 达到最大深度限制，不再添加子关键词", {
+          keyword,
+          parentDepth,
+          childDepth,
+          maxDepth: options.maxDepth
+        })
+        return
+      }
+
+      // 添加子关键词（带深度信息）
+      const childItems = selectedCandidates.map(kw => ({
+        keyword: kw,
+        depth: childDepth
+      }))
+
+      await KeywordStorage.addToQueue(childItems)
       console.log("[NKH] 追加关键词到队列", {
         currentKeyword: keyword,
-        added: selectedCandidates.length,
+        parentDepth,
+        childDepth,
+        added: childItems.length,
         relatedQueryLimit
       })
 
@@ -569,14 +669,10 @@ async function handleInterceptedData(url: string, responseBody: string) {
       const queueSize = await syncQueueSize()
       const updatedState = {
         ...state,
-        queueSize,
-        currentDepth: state.currentDepth + 1
+        queueSize
       }
       await KeywordStorage.setCaptureState(updatedState)
-      await sendStatusUpdate({
-        queueSize,
-        currentDepth: state.currentDepth + 1
-      })
+      await sendStatusUpdate({ queueSize })
     }
   }
 
@@ -589,7 +685,7 @@ async function handleInterceptedData(url: string, responseBody: string) {
     }
 
     // 防止重复处理（使用批次的第一个关键词作为标识）
-    const batchKey = currentBatch.join("|")
+    const batchKey = currentBatch.map(item => item.keyword).join("|")
     const now = Date.now()
     const lastProcessedAt = timelineKeywordProcessedAt.get(batchKey) || 0
 
@@ -772,10 +868,8 @@ chrome.webRequest.onCompleted.addListener(
       } catch {
       }
 
-      await finalizeCapture(
-        "abnormal",
-        endReason
-      )
+      // 改为暂停而不是终止
+      await pauseCapture("rate_limit", endReason)
     })()
   },
   {

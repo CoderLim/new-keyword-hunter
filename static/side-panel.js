@@ -6,11 +6,15 @@ let state = {
   processedCount: 0,
   queueSize: 0,
   effectiveNewWordsCount: 0,
-  currentDepth: 0,
+  currentGroupProgress: 0,
+  currentGroupTarget: 0,
+  pauseReason: undefined,
+  scheduledResumeTime: undefined,
   endReason: "",
   statusMessage: "未开始"
 }
 let showResultNotice = false
+let countdownInterval = null
 
 let effectiveWords = []
 
@@ -118,7 +122,9 @@ function handleStart() {
   const timeRange = document.getElementById("timeRange")?.value || "today 12-m"
   const geo = document.getElementById("geo")?.value || ""
   const threshold = parseInt(document.getElementById("threshold")?.value || "20", 10)
-  const maxKeywords = parseInt(document.getElementById("maxKeywords")?.value || "100", 10)
+  const maxDepth = parseInt(document.getElementById("maxDepth")?.value || "3", 10)
+  const requestsPerGroup = parseInt(document.getElementById("requestsPerGroup")?.value || "10", 10)
+  const groupRestMinutes = parseFloat(document.getElementById("groupRestMinutes")?.value || "5")
   const relatedQueryLimit = parseInt(document.getElementById("relatedQueryLimit")?.value || "20", 10)
 
   const seeds = seedKeywordsText
@@ -131,7 +137,9 @@ function handleStart() {
     seedKeywords: seeds.length > 0 ? seeds : [baseKeyword.trim()],
     timeRange,
     threshold,
-    maxKeywords,
+    maxDepth,
+    requestsPerGroup,
+    groupRestMinutes,
     relatedQueryLimit,
     geo
   }
@@ -143,6 +151,8 @@ function handleStart() {
 
   state.isActive = true
   state.queueSize = options.seedKeywords.length
+  state.currentGroupProgress = 0
+  state.currentGroupTarget = options.requestsPerGroup
   state.endReason = ""
   showResultNotice = false
   updateUI()
@@ -151,14 +161,19 @@ function handleStart() {
 function handlePause() {
   chrome.runtime.sendMessage({ type: "PAUSE_CAPTURE" })
   state.isPaused = true
+  state.pauseReason = "manual"
   state.statusMessage = "已暂停"
+  clearCountdownInterval()
   updateUI()
 }
 
 function handleResume() {
   chrome.runtime.sendMessage({ type: "RESUME_CAPTURE" })
   state.isPaused = false
+  state.pauseReason = undefined
+  state.scheduledResumeTime = undefined
   state.statusMessage = "恢复处理中..."
+  clearCountdownInterval()
   updateUI()
 }
 
@@ -170,7 +185,39 @@ function handleStop() {
   state.statusMessage = "已停止"
   state.endReason = "手动停止"
   showResultNotice = wasActive
+  clearCountdownInterval()
   updateUI()
+}
+
+function clearCountdownInterval() {
+  if (countdownInterval) {
+    clearInterval(countdownInterval)
+    countdownInterval = null
+  }
+}
+
+function startCountdownInterval() {
+  clearCountdownInterval()
+
+  countdownInterval = setInterval(() => {
+    if (!state.scheduledResumeTime) {
+      clearCountdownInterval()
+      return
+    }
+
+    const now = Date.now()
+    const remaining = state.scheduledResumeTime - now
+
+    if (remaining <= 0) {
+      clearCountdownInterval()
+      document.getElementById("resumeCountdown").textContent = "即将恢复..."
+      return
+    }
+
+    const minutes = Math.floor(remaining / 60000)
+    const seconds = Math.floor((remaining % 60000) / 1000)
+    document.getElementById("resumeCountdown").textContent = `${minutes}分${seconds}秒后自动继续`
+  }, 1000)
 }
 
 async function handleExport() {
@@ -305,7 +352,40 @@ function updateUI() {
   processedCountEl.textContent = state.processedCount
   queueSizeEl.textContent = state.queueSize
   effectiveNewWordsCountEl.textContent = state.effectiveNewWordsCount
-  currentDepthEl.textContent = state.currentDepth
+
+  // 组进度
+  const groupProgressEl = document.getElementById("groupProgress")
+  if (groupProgressEl) {
+    groupProgressEl.textContent = `${state.currentGroupProgress || 0} / ${state.currentGroupTarget || 0}`
+  }
+
+  // 暂停原因
+  const pauseReasonItem = document.getElementById("pauseReasonItem")
+  const pauseReasonEl = document.getElementById("pauseReason")
+  if (isPaused && state.pauseReason) {
+    const reasonText = {
+      manual: "手动暂停",
+      group_complete: "完成当前组",
+      max_depth: "达到最大深度",
+      rate_limit: "触发限频"
+    }[state.pauseReason] || state.pauseReason
+
+    pauseReasonEl.textContent = reasonText
+    pauseReasonItem.style.display = "block"
+  } else {
+    pauseReasonItem.style.display = "none"
+  }
+
+  // 恢复倒计时
+  const resumeCountdownItem = document.getElementById("resumeCountdownItem")
+  if (isPaused && state.scheduledResumeTime) {
+    resumeCountdownItem.style.display = "block"
+    startCountdownInterval()
+  } else {
+    resumeCountdownItem.style.display = "none"
+    clearCountdownInterval()
+  }
+
   statusMessageEl.textContent = state.statusMessage
 
   if (state.isActive) {

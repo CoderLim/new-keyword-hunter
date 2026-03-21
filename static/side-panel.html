@@ -662,15 +662,40 @@
                 </div>
 
                 <div class="form-group">
-                  <label for="maxKeywords">最大处理数</label>
+                  <label for="maxDepth">最大挖掘深度</label>
                   <input
-                    id="maxKeywords"
+                    id="maxDepth"
                     type="number"
-                    min="0"
-                    value="100"
-                    placeholder="0 = 无限制"
+                    min="1"
+                    value="3"
+                    placeholder="递归层数"
+                  />
+                  <div class="form-help">0=种子词，1=第一层，2=第二层，以此类推</div>
+                </div>
+
+                <div class="form-group">
+                  <label for="requestsPerGroup">每组查询次数</label>
+                  <input
+                    id="requestsPerGroup"
+                    type="number"
+                    min="1"
+                    value="10"
+                    placeholder="请求N次后暂停"
                   />
                 </div>
+              </div>
+
+              <div class="form-group">
+                <label for="groupRestMinutes">组间休息时间（分钟）</label>
+                <input
+                  id="groupRestMinutes"
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value="5"
+                  placeholder="支持小数，如0.5"
+                />
+                <div class="form-help">每请求N次 Google Trends 页面后暂停休息，直接控制访问频率</div>
               </div>
 
               <div class="form-group">
@@ -725,8 +750,18 @@
             </div>
 
             <div class="status-item">
-              <span class="status-label">🔄 挖掘深度</span>
-              <span id="currentDepth" class="status-value">0</span>
+              <span class="status-label">📦 当前组进度</span>
+              <span id="groupProgress" class="status-value">0 / 0</span>
+            </div>
+
+            <div class="status-item full-width" id="pauseReasonItem" style="display: none;">
+              <span class="status-label">⏸ 暂停原因</span>
+              <span id="pauseReason" class="status-value">-</span>
+            </div>
+
+            <div class="status-item full-width" id="resumeCountdownItem" style="display: none;">
+              <span class="status-label">⏱ 恢复倒计时</span>
+              <span id="resumeCountdown" class="status-value">-</span>
             </div>
 
             <div class="status-item full-width">

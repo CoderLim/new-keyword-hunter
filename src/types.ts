@@ -61,7 +61,20 @@ export interface BatchAnalysisResult {
   candidateAvg: number
 }
 
+/**
+ * 队列项（带深度跟踪）
+ */
+export interface QueueItem {
+  keyword: string
+  depth: number  // 0 = 种子词, 1 = 第一层, 2 = 第二层, 以此类推
+}
+
 export type CaptureEndType = "normal" | "abnormal"
+
+/**
+ * 暂停原因类型
+ */
+export type PauseReason = "manual" | "group_complete" | "max_depth" | "rate_limit"
 
 /**
  * 捕获状态
@@ -73,9 +86,10 @@ export interface CaptureState {
   processedCount: number
   queueSize: number
   effectiveNewWordsCount: number
-  currentDepth: number
+  currentGroupProgress: number      // 当前组已发起的请求数（不是关键词数）
+  pauseReason?: PauseReason        // 暂停原因
+  scheduledResumeTime?: number     // 定时恢复的时间戳
   statusMessage: string
-  maxKeywords?: number
   lastError?: string
   endType?: CaptureEndType
   endReason?: string
@@ -89,7 +103,9 @@ export interface CaptureOptions {
   seedKeywords: string[]
   timeRange: string
   threshold: number
-  maxKeywords: number
+  maxDepth: number              // 最大递归深度
+  requestsPerGroup: number      // 每组请求次数（每次调用 processNextKeyword 算1次请求）
+  groupRestMinutes: number      // 组间休息时间（分钟）
   relatedQueryLimit?: number
   geo?: string
 }

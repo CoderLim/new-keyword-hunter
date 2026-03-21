@@ -5,7 +5,8 @@ import type {
   HistoryRecord,
   CaptureOptions,
   AnalysisResult,
-  CaptureReport
+  CaptureReport,
+  QueueItem
 } from "../types"
 
 const storage = new Storage({
@@ -117,13 +118,21 @@ export class KeywordStorage {
   /**
    * 获取待处理队列
    */
-  static async getKeywordsQueue(): Promise<string[]> {
+  static async getKeywordsQueue(): Promise<QueueItem[]> {
     const data = await storage.getItem<string>("keywordsQueue")
     if (!data) {
       return []
     }
     try {
-      return JSON.parse(data)
+      const parsed = JSON.parse(data)
+      // 处理旧格式数据迁移：string[] -> QueueItem[]
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        if (typeof parsed[0] === "string") {
+          console.log("[NKH] 检测到旧格式队列数据，自动迁移为新格式")
+          return parsed.map(keyword => ({ keyword, depth: 0 }))
+        }
+      }
+      return parsed as QueueItem[]
     } catch (error) {
       console.error("解析关键词队列失败:", error)
       return []
@@ -133,29 +142,39 @@ export class KeywordStorage {
   /**
    * 设置待处理队列
    */
-  static async setKeywordsQueue(queue: string[]): Promise<void> {
+  static async setKeywordsQueue(queue: QueueItem[]): Promise<void> {
     await storage.setItem("keywordsQueue", JSON.stringify(queue))
   }
 
   /**
-   * 添加关键词到队列
+   * 添加关键词到队列（带深度信息）
    */
-  static async addToQueue(keywords: string[]): Promise<void> {
+  static async addToQueue(items: Array<{keyword: string, depth: number}>): Promise<void> {
     const queue = await this.getKeywordsQueue()
     const processed = await this.getProcessedKeywords()
+    const options = await this.getCaptureOptions()
 
-    // 去重并过滤已处理的
-    const newWords = [...new Set([...queue, ...keywords])].filter(
-      (w) => !processed.has(w)
-    )
+    // 过滤：1) 已处理的关键词 2) 超过最大深度的关键词
+    const newItems = items.filter(item => {
+      if (processed.has(item.keyword)) return false
+      if (options && item.depth >= options.maxDepth) {
+        console.log("[NKH] 过滤超深度关键词", { keyword: item.keyword, depth: item.depth, maxDepth: options.maxDepth })
+        return false
+      }
+      return true
+    })
 
-    await this.setKeywordsQueue(newWords)
+    // 按关键词去重（保留第一次出现的深度）
+    const existingKeywords = new Set(queue.map(q => q.keyword))
+    const uniqueNewItems = newItems.filter(item => !existingKeywords.has(item.keyword))
+
+    await this.setKeywordsQueue([...queue, ...uniqueNewItems])
   }
 
   /**
    * 从队列取出下一个关键词
    */
-  static async getNextKeyword(): Promise<string | null> {
+  static async getNextKeyword(): Promise<QueueItem | null> {
     const queue = await this.getKeywordsQueue()
     if (queue.length === 0) {
       return null
@@ -171,7 +190,7 @@ export class KeywordStorage {
    * @param batchSize 批量大小
    * @returns 出队的关键词数组（可能少于 batchSize）
    */
-  static async getNextBatch(batchSize: number): Promise<string[]> {
+  static async getNextBatch(batchSize: number): Promise<QueueItem[]> {
     const queue = await this.getKeywordsQueue()
     if (queue.length === 0) {
       return []
@@ -242,7 +261,7 @@ export class KeywordStorage {
         processedCount: 0,
         queueSize: 0,
         effectiveNewWordsCount: 0,
-        currentDepth: 0,
+        currentGroupProgress: 0,
         endReason: "",
         statusMessage: "未开始"
       }
@@ -251,6 +270,7 @@ export class KeywordStorage {
       const parsed = JSON.parse(data)
       return {
         isPaused: false,
+        currentGroupProgress: 0,
         ...parsed
       }
     } catch (error) {
@@ -262,7 +282,7 @@ export class KeywordStorage {
         processedCount: 0,
         queueSize: 0,
         effectiveNewWordsCount: 0,
-        currentDepth: 0,
+        currentGroupProgress: 0,
         endReason: "",
         statusMessage: "未开始"
       }
